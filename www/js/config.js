@@ -3,7 +3,7 @@
  * Replace WORKER_URL below with your deployed Cloudflare Worker URL,
  * or configure it dynamically in the in-app Profile/Settings tab.
  */
-const WORKER_URL = "PUT_YOUR_CLOUDFLARE_WORKER_URL_HERE";
+const WORKER_URL = "https://vuel.azzamalmiklafi.workers.dev";
 
 window.VuelConfig = {
   DEFAULT_WORKER_URL: WORKER_URL,
@@ -29,7 +29,7 @@ window.VuelConfig = {
     const url = this.getWorkerUrl();
     return Boolean(
       url &&
-      url !== "vuel.azzamalmiklafi.workers.dev" &&
+      url !== "PUT_YOUR_CLOUDFLARE_WORKER_URL_HERE" &&
       (url.startsWith("https://") || url.startsWith("http://"))
     );
   }
