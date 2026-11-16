@@ -1,0 +1,19 @@
+{
+  "name": "vuel-english-ai",
+  "version": "1.0.0",
+  "description": "Vuel (فويل) - Offline-first Interactive AI English Learning App",
+  "author": "Azzam Adnan Al-Mikhlafi (عزام عدنان المخلافي) - Sana'a, Yemen",
+  "private": true,
+  "scripts": {
+    "cap:add:android": "npx cap add android",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}

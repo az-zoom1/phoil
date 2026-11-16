@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#070B14" />
+  <title>Vuel | فويل لتعلّم الإنجليزية بالذكاء الاصطناعي</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <!-- Top Header -->
+    <header class="top-bar">
+      <div class="brand-cluster">
+        <div class="brand-logo" aria-hidden="true">
+          <svg viewBox="0 0 36 36" width="30" height="30">
+            <circle cx="18" cy="18" r="17" fill="#0D162B" stroke="#00E5FF" stroke-width="1.5"/>
+            <path d="M10 13 L14 16 L18 14 L22 16 L26 13 L24 23 L18 27 L12 23 Z" fill="#10B981" opacity="0.25"/>
+            <circle cx="13.5" cy="17" r="3" fill="#FBBF24"/>
+            <circle cx="22.5" cy="17" r="3" fill="#FBBF24"/>
+            <circle cx="13.5" cy="17" r="1.3" fill="#070B14"/>
+            <circle cx="22.5" cy="17" r="1.3" fill="#070B14"/>
+            <polygon points="18,19 16.3,22 19.7,22" fill="#00E5FF"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">Vuel <small>فويل</small></span>
+          <span id="connection-badge" class="status-pill status-offline">وضع أوفلاين الذكي</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button id="btn-speed-toggle" class="chip-btn" type="button" title="تبديل سرعة النطق">
+          <span id="speed-label">سرعة: عادي</span>
+        </button>
+        <button id="btn-gems-pill" class="gems-pill" type="button" title="رصيد المجوهرات">
+          <span class="gem-icon">💎</span>
+          <span id="gems-count">25</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Dynamic View Container -->
+    <main id="main-content" class="main-content">
+      <!-- Live Stage View -->
+      <section id="view-stage" class="view active" aria-label="المحادثة الحية">
+        <div class="scenario-banner">
+          <div class="scenario-banner-info">
+            <span id="stage-scenario-emoji" class="scenario-emoji">🛒</span>
+            <div>
+              <div id="stage-scenario-title" class="scenario-title-ar">البقالة • Grocery Store</div>
+              <div id="stage-level-tag" class="scenario-meta">المستوى: مبتدئ • الشرح بالعربية</div>
+            </div>
+          </div>
+          <button id="btn-change-scenario" class="mini-outline-btn" type="button">تغيير السيناريو</button>
+        </div>
+
+        <!-- Animated SVG Character Stage -->
+        <div class="character-stage" id="character-stage">
+          <div class="stage-glow"></div>
+          <div class="stage-badges-row">
+            <span id="stage-char-name" class="stage-chip">فويل (البومة)</span>
+            <span id="stage-speech-indicator" class="speech-badge idle">جاهز للاستماع</span>
+          </div>
+          <div id="svg-character-mount" class="svg-character-mount" aria-label="الشخصية التفاعلية"></div>
+          <div class="stage-controls-overlay">
+            <button id="btn-replay-tts" class="icon-circle-btn" type="button" title="إعادة الاستماع" aria-label="إعادة الاستماع">🔊</button>
+            <button id="btn-stop-tts" class="icon-circle-btn hidden" type="button" title="إيقاف الصوت" aria-label="إيقاف الصوت">⏹️</button>
+          </div>
+        </div>
+
+        <!-- Conversation Messages -->
+        <div id="chat-feed" class="chat-feed" role="log" aria-live="polite"></div>
+
+        <!-- Quick Smart Action Chips -->
+        <div class="smart-actions-bar">
+          <button id="btn-smart-hint" class="action-chip chip-cyan" type="button">💡 تلميح ذكي (-5💎)</button>
+          <button id="btn-skip-question" class="action-chip chip-amber" type="button">⏭️ تجاوز السؤال (-10💎)</button>
+          <button id="btn-what-means" class="action-chip chip-violet" type="button">❓ ما معنى هذه؟</button>
+        </div>
+
+        <!-- Input Bar -->
+        <form id="chat-form" class="chat-input-bar">
+          <button id="btn-mic" class="mic-btn" type="button" aria-label="تحدث بالإنجليزية" title="تحدث بالإنجليزية">
+            <span class="mic-icon">🎙️</span>
+          </button>
+          <input
+            id="chat-input"
+            class="chat-input"
+            type="text"
+            dir="auto"
+            autocomplete="off"
+            placeholder="اكتب بالإنجليزية أو اسأل بالعربية..."
+          />
+          <button id="btn-send" class="send-btn" type="submit" aria-label="إرسال">إرسال</button>
+        </form>
+      </section>
+
+      <!-- Scenarios Library View (50+ Scenarios) -->
+      <section id="view-scenarios" class="view" aria-label="مكتبة السيناريوهات">
+        <div class="section-header">
+          <h2>مكتبة السيناريوهات <span id="scenarios-count-badge" class="count-badge">54</span></h2>
+          <p class="section-sub">اختر موقفاً حقيقياً لتبدأ المحادثة فوراً مع زيّ وشخصية مخصصة</p>
+        </div>
+        <div class="search-box">
+          <input id="scenario-search" type="search" placeholder="ابحث عن سيناريو (مطار، مطعم، مقابلة...)" />
+        </div>
+        <div id="category-pills" class="category-pills"></div>
+        <div id="scenarios-grid" class="scenarios-grid"></div>
+      </section>
+
+      <!-- Offline Review Deck View -->
+      <section id="view-review" class="view" aria-label="أخطائي للمراجعة">
+        <div class="section-header">
+          <h2>أخطائي للمراجعة (بدون إنترنت)</h2>
+          <p class="section-sub">كل تصحيح لغوي يُحفظ تلقائياً هنا للمراجعة الذكية بالبطاقات</p>
+        </div>
+        <div class="review-stats-row" id="review-stats-row"></div>
+        <div id="flashcard-stage" class="flashcard-stage"></div>
+        <div id="mistakes-list" class="mistakes-list"></div>
+      </section>
+
+      <!-- Characters, Shop & Profile View -->
+      <section id="view-profile" class="view" aria-label="الملف والمتجر">
+        <div class="section-header">
+          <h2>الملف الشخصي ومتجر فويل</h2>
+          <p class="section-sub">ذاكرة الذكاء الاصطناعي المحلية وتخصيص الشخصيات والأزياء</p>
+        </div>
+
+        <div id="memory-profile-card" class="glass-card"></div>
+
+        <div class="glass-card">
+          <h3>الشخصيات التفاعلية</h3>
+          <div id="characters-shop-grid" class="shop-grid"></div>
+        </div>
+
+        <div class="glass-card">
+          <h3>الأزياء والإكسسوارات النادرة</h3>
+          <div id="outfits-shop-grid" class="shop-grid"></div>
+        </div>
+
+        <div class="glass-card">
+          <h3>اتصال Cloudflare Worker & Gemini</h3>
+          <p class="muted-text">يمكنك وضع رابط Cloudflare Worker الخاص بك هنا أو داخل ملف <code>js/config.js</code>.</p>
+          <div class="worker-input-row">
+            <input id="worker-url-input" type="url" dir="ltr" placeholder="https://vuel-proxy.yourname.workers.dev" />
+            <button id="btn-save-worker" class="primary-btn" type="button">حفظ</button>
+          </div>
+          <div class="settings-buttons-row">
+            <button id="btn-retake-placement" class="secondary-btn" type="button">إعادة اختبار تحديد المستوى</button>
+            <button id="btn-reset-data" class="danger-btn" type="button">مسح البيانات المحلية</button>
+          </div>
+        </div>
+
+        <footer class="dev-copyright-card" aria-label="حقوق الملكية">
+          <div class="copyright-title">جميع الحقوق محفوظة لدى المبرمج عزام عدنان المخلافي.</div>
+          <div class="copyright-location">صنعاء - اليمن.</div>
+        </footer>
+      </section>
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav" aria-label="التنقل الرئيسي">
+      <button class="nav-item active" data-view="stage" type="button">
+        <span class="nav-icon">🎙️</span>
+        <span class="nav-label">المحادثة</span>
+      </button>
+      <button class="nav-item" data-view="scenarios" type="button">
+        <span class="nav-icon">🗺️</span>
+        <span class="nav-label">السيناريوهات</span>
+      </button>
+      <button class="nav-item" data-view="review" type="button">
+        <span class="nav-icon">🃏</span>
+        <span class="nav-label">أخطائي</span>
+      </button>
+      <button class="nav-item" data-view="profile" type="button">
+        <span class="nav-icon">🦉</span>
+        <span class="nav-label">المتجر</span>
+      </button>
+    </nav>
+
+    <!-- Tap-to-Translate Popover Sheet -->
+    <div id="word-popup" class="word-popup hidden" role="dialog" aria-label="الترجمة الفورية">
+      <div class="word-popup-card">
+        <div class="word-popup-top">
+          <div>
+            <span id="popup-word-en" class="popup-word-en" dir="ltr">word</span>
+            <span id="popup-phonetic" class="popup-phonetic" dir="ltr">/wɜːrd/</span>
+          </div>
+          <div class="popup-top-btns">
+            <button id="popup-speak-btn" class="icon-circle-btn" type="button" aria-label="استمع للكلمة">🔊</button>
+            <button id="popup-close-btn" class="icon-circle-btn" type="button" aria-label="إغلاق">✕</button>
+          </div>
+        </div>
+        <div id="popup-arabic-phonetic" class="popup-ar-phonetic">النطق: وورد</div>
+        <div id="popup-meaning-ar" class="popup-meaning-ar">كلمة</div>
+      </div>
+    </div>
+
+    <!-- Onboarding & AI Placement Test Modal -->
+    <div id="onboarding-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="تحديد المستوى">
+      <div class="modal-card">
+        <div class="modal-hero-svg" id="onboarding-owl-mount"></div>
+        <h1 class="modal-title">أهلاً بك في <span class="neon-text">Vuel (فويل)</span></h1>
+        <p class="modal-question">ما هو مدى مستواك في تعلم الإنجليزية؟</p>
+
+        <div id="onboarding-step-choose" class="onboarding-choices">
+          <button id="btn-level-beginner" class="level-choice-card" type="button">
+            <span class="choice-badge emerald">مبتدئ • Beginner</span>
+            <strong>أبدأ من الأساسيات</strong>
+            <small>تصحيح دافئ وشرح القواعد بالعربية خطوة بخطوة</small>
+          </button>
+          <button id="btn-level-advanced" class="level-choice-card" type="button">
+            <span class="choice-badge cyan">متقدم • Advanced</span>
+            <strong>أتحدث بطلاقة وأريد الممارسة</strong>
+            <small>محادثة إنجليزية كاملة مع ترجمة فورية عند الضغط على أي كلمة</small>
+          </button>
+          <button id="btn-start-placement" class="level-choice-card placement-highlight" type="button">
+            <span class="choice-badge amber">⚡ اختبار سريع بالذكاء الاصطناعي</span>
+            <strong>اختبرني الآن وحدد مستواي (+30 💎)</strong>
+            <small>سؤال محادثة سريع يقيّم دقتك وسرعتك ويرقيك تلقائياً</small>
+          </button>
+        </div>
+
+        <div id="onboarding-step-test" class="placement-test-box hidden">
+          <div class="placement-prompt-bubble" dir="ltr">
+            <span class="placement-q-label" dir="rtl">سؤال فويل السريع:</span>
+            <p id="placement-question-text">Hi! What is your name, and what do you like to do in your free time?</p>
+          </div>
+          <div class="placement-timer-row">
+            <span>الوقت المنقضي: <strong id="placement-timer">0</strong> ث</span>
+            <button id="btn-placement-listen" class="mini-outline-btn" type="button">🔊 استمع للسؤال</button>
+          </div>
+          <div class="placement-input-row">
+            <button id="btn-placement-mic" class="mic-btn" type="button" aria-label="إجابة صوتية">🎙️</button>
+            <input id="placement-answer-input" type="text" dir="ltr" placeholder="Type your English answer here..." />
+          </div>
+          <div class="placement-actions">
+            <button id="btn-placement-submit" class="primary-btn" type="button">تحليل مستواي الآن ✨</button>
+            <button id="btn-placement-back" class="ghost-btn" type="button">رجوع</button>
+          </div>
+          <div id="placement-result-box" class="placement-result hidden"></div>
+        </div>
+
+        <p class="modal-copyright">
+          جميع الحقوق محفوظة لدى المبرمج عزام عدنان المخلافي. — صنعاء - اليمن.
+        </p>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden" role="status"></div>
+  </div>
+
+  <!-- Scripts in strict dependency order (no ES module CORS issues on file://) -->
+  <script src="js/config.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/dictionary.js"></script>
+  <script src="js/scenarios.js"></script>
+  <script src="js/characters.js"></script>
+  <script src="js/speech.js"></script>
+  <script src="js/ai-client.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

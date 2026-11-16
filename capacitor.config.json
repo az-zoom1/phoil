@@ -1,0 +1,21 @@
+{
+  "appId": "com.aistudio.vuel.kzmprq",
+  "appName": "Vuel",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#070B14",
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 800,
+      "backgroundColor": "#070B14"
+    }
+  }
+}

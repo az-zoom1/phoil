@@ -1,0 +1,6 @@
+{
+  "name": "Vuel",
+  "description": "Offline-first interactive AI English learning app (فويل) with animated SVG characters, real-time lip-sync, 50+ roleplay scenarios, and gamified learning.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
