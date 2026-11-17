@@ -158,115 +158,15 @@ CRITICAL LIVE-CALL RULES:
     return null;
   }
 
-  function generateOfflineReply({ userText, profile, scenario, history, lastAiText }) {
-    const text = String(userText || "").trim();
-    const lower = text.toLowerCase();
-    const mistake = detectCommonMistake(text);
-    const nameCall = profile.name ? `, ${profile.name}` : "";
-
-    // 1) Comprehension / Confusion / Repeat intent (handles "I am not understand", "I don't understand", "what?", etc.)
-    if (/(?:not\s+understand|don't\s+understand|didn't\s+understand|no\s+understand|confused|repeat|say\s+that\s+again|slower|ما\s*فهمت|مش\s*فاهم|لم\s*أفهم|أعد|بطيء)/i.test(text)) {
-      const simplifiedAr = scenario.openingLineAr || "لا تقلق أبداً، سأشرح لك ببساطة!";
-      const hint = (scenario.hints && scenario.hints[0]) || "Yes, please.";
-      return {
-        englishText: `No worries${nameCall}! Let me make it simpler: "${lastAiText || scenario.openingLine}". You can answer: "${hint}"`,
-        arabicNote: mistake
-          ? `لا تقلق أبداً 😊: ${mistake.explanationAr} — ومعنى كلامي السابق هو: "${simplifiedAr}". جرّب أن تجيب بهذه الجملة السهلة: "${hint}"`
-          : `بكل سرور 😊 معنى ما قلته لك: "${simplifiedAr}". يمكنك الرد بسهولة: "${hint}"`,
-        mistakePatch: mistake,
-        gemsEarned: 5
-      };
-    }
-
-    // 2) Explicit Translation request ("ما معنى هذه؟")
-    if (/ما معنى|ترجم|what does .* mean|meaning of/i.test(text)) {
-      const wordMatch = text.match(/mean(?:ing)?(?:\s+of)?\s+["']?([a-zA-Z]+)["']?/i);
-      const targetWord = wordMatch ? wordMatch[1] : "";
-      if (targetWord && window.VuelDictionary) {
-        const entry = window.VuelDictionary.lookup(targetWord);
-        return {
-          englishText: `Great question! "${entry.word}" means ${entry.meaningAr}. Now let's continue in the ${scenario.titleEn}!`,
-          arabicNote: `معنى "${entry.word}" (${entry.arabicPhonetic}): ${entry.meaningAr}. والآن لنكمل الحوار بالإنجليزية!`,
-          mistakePatch: null,
-          gemsEarned: 5
-        };
-      }
-      return {
-        englishText: `Of course! It means: ${scenario.openingLineAr || lastAiText}. Ready to reply in English?`,
-        arabicNote: `المقصود بالجملة: "${scenario.openingLineAr || lastAiText}" — ويمكنك الضغط على أي كلمة إنجليزية أعلاه لترجمتها فوراً!`,
-        mistakePatch: null,
-        gemsEarned: 5
-      };
-    }
-
-    // 3) Grammar correction in Beginner mode (prioritize teaching warmly before continuing)
-    if (mistake && profile.level === "beginner") {
-      return {
-        englishText: `Good try${nameCall}! We say: "${mistake.correct}". Can you say that one more time?`,
-        arabicNote: `تصحيح ذكي 🌟: ${mistake.explanationAr} الجملة الصحيحة: "${mistake.correct}". كررها بصوتك الآن!`,
-        mistakePatch: mistake,
-        gemsEarned: 5
-      };
-    }
-
-    // 4) Greetings & conversational small talk ("Hello", "How are you?", "My name is...")
-    if (/^(?:hello|hi|hey|good\s+morning|good\s+evening|how\s+are\s+you|peace|مرحبا|أهلا|السلام)/i.test(lower)) {
-      return {
-        englishText: `Hey${nameCall}! I'm doing awesome and super happy to talk with you! Back to our ${scenario.titleEn}—what would you like to say or ask first?`,
-        arabicNote: profile.level === "beginner"
-          ? `أهلاً بك${profile.name ? " يا " + profile.name : ""}! أنا بخير وسعيد بالتحدث معك. والآن لنكمل موقف (${scenario.titleAr}): ماذا تريد أن تقول أو تطلب؟`
-          : "",
-        mistakePatch: mistake,
-        gemsEarned: 8
-      };
-    }
-
-    // 5) Questions from user (How much, Where, Can I, What...)
-    if (/\?|^(?:how|what|where|when|why|can|could|do|does|is|are)\b/i.test(lower)) {
-      if (/how\s+much|price|cost/i.test(lower)) {
-        return {
-          englishText: `It is only five dollars today! Would you like to take it or see something else?`,
-          arabicNote: profile.level === "beginner" ? "السعر خمسة دولارات فقط اليوم! هل تود أخذه أم رؤية شيء آخر؟" : "",
-          mistakePatch: mistake,
-          gemsEarned: 10
-        };
-      }
-      if (/where/i.test(lower)) {
-        return {
-          englishText: `It is right over there on the second aisle to your left. Shall I show you?`,
-          arabicNote: profile.level === "beginner" ? "هو هناك مباشرة في الممر الثاني على يسارك. هل أريك إياه؟" : "",
-          mistakePatch: mistake,
-          gemsEarned: 10
-        };
-      }
-    }
-
-    // 6) Pure Arabic input -> help translate into English naturally
-    const hasArabic = /[\u0600-\u06FF]/.test(text);
-    const hasEnglish = /[a-zA-Z]{2,}/.test(text);
-    if (hasArabic && !hasEnglish) {
-      const hint = (scenario.hints && scenario.hints[0]) || "Could you help me, please?";
-      return {
-        englishText: `Nice! Here is how you say that in English: "${hint}". Try saying it out loud!`,
-        arabicNote: `ممتاز! جرّب أن تنطقها بالإنجليزية هكذا: "${hint}"`,
-        mistakePatch: null,
-        gemsEarned: 5
-      };
-    }
-
-    // 7) Natural scenario continuation
-    const turnCount = history.filter((m) => m.role === "user").length;
-    const followUps = scenario.followUps || [];
-    const followUp = followUps[turnCount % Math.max(1, followUps.length)] ||
-      `That sounds great${nameCall}! Tell me a bit more so we keep practicing.`;
-
+  function buildOfflineErrorReply() {
     return {
-      englishText: (profile.level === "advanced" ? "" : `Well said${nameCall}! `) + followUp,
-      arabicNote: profile.level === "beginner"
-        ? `ممتاز${profile.name ? " يا " + profile.name : ""}! جملتك طبيعية جداً. واصل الحوار في (${scenario.titleAr}).`
-        : "",
-      mistakePatch: mistake || null,
-      gemsEarned: 10
+      englishText: "Excuse me, sir. There is an error, and the internet is not connected. Would you like to go to the quiz?",
+      arabicNote: "يا أيها السيد، هنالك خطأ، الإنترنت غير مفتوح. هل تريد الانتقال إلى الاختبار؟",
+      profilePatch: null,
+      mistakePatch: null,
+      gemsEarned: 0,
+      offlineError: true,
+      mode: "offline-error"
     };
   }
 
@@ -342,21 +242,15 @@ CRITICAL LIVE-CALL RULES:
   }
 
   async function startScenarioOpening({ profile, scenario, recentMistakes }) {
-    const fallback = {
-      englishText: scenario.openingLine,
-      arabicNote: profile.level === "beginner" ? (scenario.openingLineAr || "") : "",
-      mode: "offline"
-    };
-
     const workerUrl = window.VuelConfig && window.VuelConfig.getWorkerUrl();
     const configured = window.VuelConfig && window.VuelConfig.isWorkerConfigured();
     const online = window.VuelSpeech ? window.VuelSpeech.isOnline() : navigator.onLine !== false;
-    if (!configured || !online) return fallback;
+    if (!configured || !online) return buildOfflineErrorReply();
 
     abortActiveTurn();
     const controller = new AbortController();
     activeTurnController = controller;
-    const tid = setTimeout(() => controller.abort(), 5000);
+    const tid = setTimeout(() => controller.abort(), 6500);
 
     try {
       const prompt = buildSystemPrompt(profile, scenario, recentMistakes);
@@ -376,20 +270,21 @@ CRITICAL LIVE-CALL RULES:
         })
       });
       clearTimeout(tid);
-      if (!res.ok) return fallback;
+      if (!res.ok) return buildOfflineErrorReply();
 
       const raw = await readWorkerStreamOrJson(res, null, null);
-      if (!raw || !raw.trim()) return fallback;
+      if (!raw || !raw.trim()) return buildOfflineErrorReply();
       const parsed = parseTaggedResponse(raw);
-      if (!parsed.englishText) return fallback;
+      if (!parsed.englishText) return buildOfflineErrorReply();
       return {
         englishText: parsed.englishText,
-        arabicNote: parsed.arabicNote || (profile.level === "beginner" ? (scenario.openingLineAr || "") : ""),
+        arabicNote: parsed.arabicNote || "",
+        offlineError: false,
         mode: "live"
       };
     } catch (_) {
       clearTimeout(tid);
-      return fallback;
+      return buildOfflineErrorReply();
     } finally {
       if (activeTurnController === controller) {
         activeTurnController = null;
@@ -397,15 +292,15 @@ CRITICAL LIVE-CALL RULES:
     }
   }
 
-  async function sendTurn({ userText, profile, scenario, history, recentMistakes, lastAiText, onChunk, onNetworkDrop }) {
+  async function sendTurn({ userText, profile, scenario, history, recentMistakes, onChunk, onNetworkDrop }) {
     const workerUrl = window.VuelConfig && window.VuelConfig.getWorkerUrl();
     const configured = window.VuelConfig && window.VuelConfig.isWorkerConfigured();
     const online = window.VuelSpeech ? window.VuelSpeech.isOnline() : navigator.onLine !== false;
 
     if (!configured || !online) {
-      const offlineResult = generateOfflineReply({ userText, profile, scenario, history, lastAiText });
+      const offlineResult = buildOfflineErrorReply();
       if (onChunk) onChunk(offlineResult.englishText, true);
-      return { ...offlineResult, mode: "offline" };
+      return offlineResult;
     }
 
     abortActiveTurn();
@@ -454,13 +349,13 @@ CRITICAL LIVE-CALL RULES:
       return {
         ...parsed,
         gemsEarned: parsed.mistakePatch ? 5 : 10,
+        offlineError: false,
         mode: "live"
       };
     } catch (_) {
       if (stallTimer) clearTimeout(stallTimer);
       if (onNetworkDrop) onNetworkDrop();
-      const offlineResult = generateOfflineReply({ userText, profile, scenario, history, lastAiText });
-      return { ...offlineResult, mode: "offline-fallback" };
+      return buildOfflineErrorReply();
     } finally {
       if (activeTurnController === controller) {
         activeTurnController = null;

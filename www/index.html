@@ -128,6 +128,7 @@
             <div id="live-subtitle-en" class="bubble-en-line" dir="ltr"></div>
             <div id="live-subtitle-ar" class="live-subtitle-ar hidden"></div>
             <div id="live-subtitle-corr" class="bubble-correction-box hidden"></div>
+            <button id="btn-go-quiz-offline" class="go-quiz-offline-btn hidden" type="button">📝 الانتقال إلى الاختبار الآن</button>
             <div class="tap-hint-caption">اضغط على أي كلمة للترجمة الفورية والنطق</div>
           </div>
 
@@ -179,7 +180,7 @@
       <!-- Scenarios Library View (54 Scenarios) -->
       <section id="view-scenarios" class="view" aria-label="مكتبة السيناريوهات">
         <div class="section-header">
-          <h2>مكتبة السيناريوهات <span id="scenarios-count-badge" class="count-badge">54</span></h2>
+          <h2>مكتبة السيناريوهات <span id="scenarios-count-badge" class="count-badge">55</span></h2>
           <p class="section-sub">اختر موقفاً حقيقياً لتبدأ المكالمة المباشرة فوراً</p>
         </div>
         <div class="search-box">
@@ -199,6 +200,15 @@
           </div>
         </div>
         <iframe id="curriculum-iframe" class="curriculum-iframe" title="مناهج الدراسة" loading="lazy"></iframe>
+      </section>
+
+      <!-- Interactive Offline Quiz View (الاختبار) -->
+      <section id="view-quiz" class="view" aria-label="الاختبار">
+        <div class="section-header">
+          <h2>الاختبار التفاعلي <span class="count-badge">يعمل بدون إنترنت</span></h2>
+          <p class="section-sub">اختبر مفرداتك وقواعدك ومواقفك بالإنجليزية مع النطق الصوتي واكسب جواهر</p>
+        </div>
+        <div id="quiz-stage-mount"></div>
       </section>
 
       <!-- Offline Review Deck View -->
@@ -256,7 +266,7 @@
       </section>
     </main>
 
-    <!-- Bottom Navigation (5 Tabs) -->
+    <!-- Bottom Navigation (6 Tabs) -->
     <nav class="bottom-nav" aria-label="التنقل الرئيسي">
       <button class="nav-item active" data-view="stage" type="button">
         <span class="nav-icon">📞</span>
@@ -269,6 +279,10 @@
       <button class="nav-item" data-view="curriculum" type="button">
         <span class="nav-icon">📚</span>
         <span class="nav-label">مناهج</span>
+      </button>
+      <button class="nav-item" data-view="quiz" type="button">
+        <span class="nav-icon">📝</span>
+        <span class="nav-label">الاختبار</span>
       </button>
       <button class="nav-item" data-view="review" type="button">
         <span class="nav-icon">🃏</span>
@@ -361,6 +375,7 @@
   <script src="js/characters.js"></script>
   <script src="js/speech.js"></script>
   <script src="js/ai-client.js"></script>
+  <script src="js/quiz.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

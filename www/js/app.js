@@ -23,6 +23,7 @@
   let consecutiveMicErrors = 0;
   let callSeconds = 0;
   let callTimerInterval = null;
+  let awaitingQuizRedirectPrompt = false;
 
   function formatDuration(sec) {
     const m = String(Math.floor(sec / 60)).padStart(2, "0");
@@ -278,6 +279,11 @@
       window.VuelSpeech.stopListening();
     }
 
+    if (tabName === "quiz" && window.VuelQuiz) {
+      window.VuelQuiz.render($("quiz-stage-mount"), {
+        onCorrectGem: (g) => updateGemsUI(g)
+      });
+    }
     if (tabName === "review") renderReviewView();
     if (tabName === "profile") renderProfileView();
     if (tabName === "scenarios") renderScenariosGrid();
@@ -368,11 +374,12 @@
     feed.scrollTop = feed.scrollHeight;
   }
 
-  function renderAiTurn({ englishText, arabicNote, mistakePatch, speakNow }) {
+  function renderAiTurn({ englishText, arabicNote, mistakePatch, speakNow, offlineError = false }) {
     // 1) Update Hero Live Subtitle Card directly below the character
     const subEn = $("live-subtitle-en");
     const subAr = $("live-subtitle-ar");
     const subCorr = $("live-subtitle-corr");
+    const goQuizBtn = $("btn-go-quiz-offline");
 
     const liveWordEls = createInteractiveEnglishNodes(englishText, subEn);
 
@@ -388,6 +395,10 @@
       subCorr.classList.remove("hidden");
     } else {
       subCorr.classList.add("hidden");
+    }
+
+    if (goQuizBtn) {
+      goQuizBtn.classList.toggle("hidden", !offlineError);
     }
 
     // 2) Also append to collapsible history drawer
@@ -456,24 +467,29 @@
     updateCallControlsUI();
     switchTab("stage");
 
-    let opening = activeScenario.openingLine;
-    let arNote = profile.level === "beginner" ? activeScenario.openingLineAr : "";
+    let opening = "";
+    let arNote = "";
+    let isOfflineErr = false;
 
     const configured = window.VuelConfig && window.VuelConfig.isWorkerConfigured();
     const online = window.VuelSpeech && window.VuelSpeech.isOnline();
 
-    if (configured && online && window.VuelAI && typeof window.VuelAI.startScenarioOpening === "function") {
-      const subEn = $("live-subtitle-en");
-      const subAr = $("live-subtitle-ar");
-      const subCorr = $("live-subtitle-corr");
-      if (subEn) subEn.textContent = "Connecting to Vuel AI...";
-      if (subAr) {
-        subAr.textContent = `جاري تجهيز مكالمة "${activeScenario.titleAr}" بالذكاء الاصطناعي...`;
-        subAr.classList.remove("hidden");
+    if (window.VuelAI && typeof window.VuelAI.startScenarioOpening === "function") {
+      if (configured && online) {
+        const subEn = $("live-subtitle-en");
+        const subAr = $("live-subtitle-ar");
+        const subCorr = $("live-subtitle-corr");
+        const goQuizBtn = $("btn-go-quiz-offline");
+        if (subEn) subEn.textContent = "Connecting to Vuel AI...";
+        if (subAr) {
+          subAr.textContent = `جاري تجهيز مكالمة "${activeScenario.titleAr}" بالذكاء الاصطناعي...`;
+          subAr.classList.remove("hidden");
+        }
+        if (subCorr) subCorr.classList.add("hidden");
+        if (goQuizBtn) goQuizBtn.classList.add("hidden");
+        window.VuelSpeech.setBadgeState("idle", "جاري الاتصال بالذكاء الاصطناعي...");
+        window.VuelCharacters && window.VuelCharacters.setBodyState("thinking");
       }
-      if (subCorr) subCorr.classList.add("hidden");
-      window.VuelSpeech.setBadgeState("idle", "جاري الاتصال بالذكاء الاصطناعي...");
-      window.VuelCharacters && window.VuelCharacters.setBodyState("thinking");
 
       const aiOpening = await window.VuelAI.startScenarioOpening({
         profile,
@@ -482,8 +498,10 @@
       });
 
       if (token !== scenarioLoadToken) return;
-      opening = aiOpening.englishText || opening;
-      arNote = aiOpening.arabicNote !== undefined ? aiOpening.arabicNote : arNote;
+      opening = aiOpening.englishText || "";
+      arNote = aiOpening.arabicNote || "";
+      isOfflineErr = Boolean(aiOpening.offlineError);
+      awaitingQuizRedirectPrompt = isOfflineErr;
 
       const badge = $("connection-badge");
       if (badge) {
@@ -492,7 +510,7 @@
           badge.textContent = "Worker متصل • Gemini Live ✓";
         } else {
           badge.className = "status-pill status-offline";
-          badge.textContent = "أوفلاين • المعلّم المحلي";
+          badge.textContent = "غير متصل بالإنترنت ✕";
         }
       }
     }
@@ -503,13 +521,30 @@
       englishText: opening,
       arabicNote: arNote,
       mistakePatch: null,
-      speakNow: autoSpeak
+      speakNow: autoSpeak,
+      offlineError: isOfflineErr
     });
   }
 
   async function handleUserMessage(rawText) {
     const text = String(rawText || "").trim();
     if (!text || isSending) return;
+
+    if (
+      awaitingQuizRedirectPrompt &&
+      /(?:^|\b)(yes|yeah|yep|ok|okay|sure|quiz|test|go)(?:\b|$)|نعم|اي|أيوة|موافق|الاختبار|انتقل/i.test(text)
+    ) {
+      $("chat-input").value = "";
+      appendUserBubbleToHistory(text);
+      awaitingQuizRedirectPrompt = false;
+      clearTimeout(autoListenRetryTimer);
+      window.VuelSpeech.stopListening();
+      window.VuelSpeech.stopSpeaking(true);
+      showToast("تم الانتقال إلى تبويب الاختبار 📝");
+      switchTab("quiz");
+      return;
+    }
+
     isSending = true;
     clearTimeout(autoListenRetryTimer);
     window.VuelSpeech.stopListening();
@@ -546,6 +581,9 @@
         }
       });
 
+      const isOfflineErr = Boolean(result && result.offlineError);
+      awaitingQuizRedirectPrompt = isOfflineErr;
+
       const badge = $("connection-badge");
       if (badge) {
         if (result.mode === "live") {
@@ -553,31 +591,33 @@
           badge.textContent = "Worker متصل • Gemini Live ✓";
         } else {
           badge.className = "status-pill status-offline";
-          badge.textContent = "أوفلاين • المعلّم المحلي";
+          badge.textContent = "غير متصل بالإنترنت ✕";
         }
       }
 
-      if (result.profilePatch) {
-        profile = window.VuelStorage.extractAndMergeProfile("", profile, result.profilePatch);
-      }
+      if (!isOfflineErr) {
+        if (result.profilePatch) {
+          profile = window.VuelStorage.extractAndMergeProfile("", profile, result.profilePatch);
+        }
 
-      if (result.mistakePatch && result.mistakePatch.correct) {
-        mistakes = await window.VuelStorage.saveMistake({
-          ...result.mistakePatch,
-          scenarioId: activeScenario.id,
-          scenarioTitleAr: activeScenario.titleAr
-        });
-        showToast("تم حفظ التصحيح في 'أخطائي' للمراجعة أوفلاين 🃏");
-      }
+        if (result.mistakePatch && result.mistakePatch.correct) {
+          mistakes = await window.VuelStorage.saveMistake({
+            ...result.mistakePatch,
+            scenarioId: activeScenario.id,
+            scenarioTitleAr: activeScenario.titleAr
+          });
+          showToast("تم حفظ التصحيح في 'أخطائي' للمراجعة أوفلاين 🃏");
+        }
 
-      const earned = result.gemsEarned || 10;
-      profile.streak = (profile.streak || 0) + 1;
-      if (profile.streak % 3 === 0) {
-        updateGemsUI(earned + 5);
-        showToast(`🔥 سلسلة رائعة! +${earned + 5} جوهرة 💎`);
-        window.VuelCharacters && window.VuelCharacters.setBodyState("happy");
-      } else {
-        updateGemsUI(earned);
+        const earned = result.gemsEarned || 10;
+        profile.streak = (profile.streak || 0) + 1;
+        if (profile.streak % 3 === 0) {
+          updateGemsUI(earned + 5);
+          showToast(`🔥 سلسلة رائعة! +${earned + 5} جوهرة 💎`);
+          window.VuelCharacters && window.VuelCharacters.setBodyState("happy");
+        } else {
+          updateGemsUI(earned);
+        }
       }
 
       chatHistory.push({ role: "assistant", englishText: result.englishText });
@@ -587,7 +627,8 @@
         englishText: result.englishText,
         arabicNote: result.arabicNote,
         mistakePatch: result.mistakePatch,
-        speakNow: true
+        speakNow: true,
+        offlineError: isOfflineErr
       });
     } catch (_) {
       isSending = false;
@@ -881,6 +922,13 @@
 
     $("btn-change-scenario").addEventListener("click", () => switchTab("scenarios"));
     $("btn-gems-pill").addEventListener("click", () => switchTab("profile"));
+    const goQuizBtn = $("btn-go-quiz-offline");
+    if (goQuizBtn) {
+      goQuizBtn.addEventListener("click", () => {
+        awaitingQuizRedirectPrompt = false;
+        switchTab("quiz");
+      });
+    }
 
     $("btn-toggle-history").addEventListener("click", () => {
       $("chat-history-drawer").classList.toggle("hidden");
