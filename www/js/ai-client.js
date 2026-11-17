@@ -261,6 +261,68 @@ CRITICAL LIVE-CALL RULES:
     };
   }
 
+  const PRIMARY_MODEL = "gemini-3-flash-preview";
+
+  async function readWorkerStreamOrJson(res, onChunk, onActivity) {
+    const contentType = res.headers.get("content-type") || "";
+    let accumulated = "";
+
+    if (res.body && contentType.includes("text/event-stream")) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        if (onActivity) onActivity();
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw || raw === "[DONE]") continue;
+          try {
+            const evt = JSON.parse(raw);
+            if (evt.t) {
+              accumulated += evt.t;
+              if (onChunk) {
+                const cleanPreview = accumulated
+                  .split("\nAR:")[0]
+                  .replace(/\[\[(PROFILE|MISTAKE):[\s\S]*$/g, "");
+                onChunk(cleanPreview, false);
+              }
+            }
+          } catch (_) {}
+        }
+      }
+      return accumulated;
+    }
+
+    const text = await res.text();
+    // Handle case where SSE lines came back without text/event-stream header
+    if (text.includes("data:")) {
+      for (const line of text.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const raw = line.slice(5).trim();
+        if (!raw || raw === "[DONE]") continue;
+        try {
+          const evt = JSON.parse(raw);
+          if (evt.t) accumulated += evt.t;
+        } catch (_) {}
+      }
+      if (accumulated) return accumulated;
+    }
+    try {
+      const json = JSON.parse(text);
+      return json.text || json.reply || text;
+    } catch (_) {
+      return text;
+    }
+  }
+
   async function sendTurn({ userText, profile, scenario, history, recentMistakes, lastAiText, onChunk, onNetworkDrop }) {
     const workerUrl = window.VuelConfig && window.VuelConfig.getWorkerUrl();
     const configured = window.VuelConfig && window.VuelConfig.isWorkerConfigured();
@@ -279,7 +341,7 @@ CRITICAL LIVE-CALL RULES:
       stallTimer = setTimeout(() => {
         if (onNetworkDrop) onNetworkDrop();
         controller.abort();
-      }, 9500);
+      }, 12500);
     };
 
     try {
@@ -289,6 +351,7 @@ CRITICAL LIVE-CALL RULES:
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
+          model: PRIMARY_MODEL,
           systemPrompt: buildSystemPrompt(profile, scenario, recentMistakes),
           history: history.slice(-8).map((m) => ({ role: m.role, text: m.englishText || m.text })),
           message: userText
@@ -299,40 +362,7 @@ CRITICAL LIVE-CALL RULES:
         throw new Error("Worker HTTP " + res.status);
       }
 
-      const contentType = res.headers.get("content-type") || "";
-      let accumulated = "";
-
-      if (res.body && contentType.includes("text/event-stream")) {
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          resetStallWatchdog();
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            const raw = line.slice(5).trim();
-            if (!raw || raw === "[DONE]") continue;
-            try {
-              const evt = JSON.parse(raw);
-              if (evt.t) {
-                accumulated += evt.t;
-                const cleanPreview = accumulated.split("\nAR:")[0].replace(/\[\[(PROFILE|MISTAKE):[\s\S]*$/g, "");
-                if (onChunk) onChunk(cleanPreview, false);
-              }
-            } catch (_) {}
-          }
-        }
-      } else {
-        const json = await res.json();
-        accumulated = json.text || json.reply || JSON.stringify(json);
-      }
+      const accumulated = await readWorkerStreamOrJson(res, onChunk, resetStallWatchdog);
 
       if (stallTimer) clearTimeout(stallTimer);
       if (!accumulated.trim()) throw new Error("Empty response");
@@ -361,18 +391,23 @@ CRITICAL LIVE-CALL RULES:
 
     if (configured && online) {
       try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 10000);
         const res = await fetch(workerUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
+            model: PRIMARY_MODEL,
             systemPrompt: `Evaluate this English placement answer in JSON ONLY: {"level":"beginner"|"advanced","feedbackAr":"short enthusiastic Arabic feedback"}. Answer time: ${elapsedSeconds}s.`,
             history: [],
             message: text
           })
         });
+        clearTimeout(tid);
         if (res.ok) {
-          const raw = await res.text();
-          const match = raw.match(/\{[\s\S]*?"level"\s*:\s*"(beginner|advanced)"[\s\S]*?\}/);
+          const fullText = await readWorkerStreamOrJson(res, null, null);
+          const match = fullText.match(/\{[\s\S]*?"level"\s*:\s*"(beginner|advanced)"[\s\S]*?\}/);
           if (match) {
             const parsed = JSON.parse(match[0]);
             const isAdv = parsed.level === "advanced";

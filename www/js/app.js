@@ -500,6 +500,17 @@
       }
     });
 
+    const badge = $("connection-badge");
+    if (badge) {
+      if (result.mode === "live") {
+        badge.className = "status-pill status-online";
+        badge.textContent = "Worker متصل • Gemini Live ✓";
+      } else {
+        badge.className = "status-pill status-offline";
+        badge.textContent = "أوفلاين • المعلّم المحلي";
+      }
+    }
+
     if (result.profilePatch) {
       profile = window.VuelStorage.extractAndMergeProfile("", profile, result.profilePatch);
     }

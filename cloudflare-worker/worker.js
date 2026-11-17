@@ -81,7 +81,7 @@ export default {
     const systemPrompt = String(body.systemPrompt || "");
     const history = Array.isArray(body.history) ? body.history.slice(-10) : [];
     const userMessage = String(body.message || "");
-    const model = body.model || "gemini-2.5-flash";
+    const model = body.model || "gemini-3-flash-preview";
 
     const contents = [
       ...history.map((m) => ({
