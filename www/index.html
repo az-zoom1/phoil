@@ -9,6 +9,51 @@
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
+  <!-- Animated Signature Splash Screen (< 4 seconds) -->
+  <div id="vuel-splash-screen" class="vuel-splash" role="presentation" aria-label="عزام عدنان - صنعاء، اليمن">
+    <div class="splash-ambient-orb"></div>
+    <div class="splash-content">
+      <div class="splash-signature-wrap" dir="rtl">
+        <span class="splash-signature-text">عزام عدنان</span>
+        <div class="splash-pen-cursor" aria-hidden="true">
+          <svg viewBox="0 0 36 36" width="32" height="32" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="penBodyGrad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#38BDF8"/>
+                <stop offset="55%" stop-color="#0284C7"/>
+                <stop offset="100%" stop-color="#0F172A"/>
+              </linearGradient>
+              <linearGradient id="penNibGrad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#FEF08A"/>
+                <stop offset="50%" stop-color="#F59E0B"/>
+                <stop offset="100%" stop-color="#B45309"/>
+              </linearGradient>
+            </defs>
+            <!-- Fountain pen tilted towards writing contact point at bottom-left (2, 34) -->
+            <g transform="translate(2, 2)">
+              <path d="M12 18 L27 3 L31 7 L16 22 Z" fill="url(#penBodyGrad)" stroke="#BAE6FD" stroke-width="0.9"/>
+              <path d="M2 31 L7 19 L14 21 L12 26 Z" fill="url(#penNibGrad)" stroke="#FEF9C3" stroke-width="0.8"/>
+              <line x1="2" y1="31" x2="9" y2="24" stroke="#78350F" stroke-width="1"/>
+              <circle cx="8.5" cy="24.5" r="1.1" fill="#0F172A"/>
+              <circle cx="2" cy="31" r="2.2" fill="#00E5FF" opacity="0.85"/>
+            </g>
+          </svg>
+        </div>
+        <svg class="splash-underline-svg" viewBox="0 0 260 22" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="splashStrokeGrad" x1="1" y1="0" x2="0" y2="0">
+              <stop offset="0%" stop-color="#00E5FF"/>
+              <stop offset="50%" stop-color="#FDE047"/>
+              <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0.25"/>
+            </linearGradient>
+          </defs>
+          <path class="splash-underline-path" d="M250 10 C190 4, 110 18, 12 9" fill="none" stroke="url(#splashStrokeGrad)" stroke-width="2.6" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="splash-location">صنعاء، اليمن</div>
+    </div>
+  </div>
+
   <div id="app" class="app-shell">
     <!-- Top Header -->
     <header class="top-bar">

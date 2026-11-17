@@ -994,6 +994,32 @@
     window.addEventListener("offline", updateConnectionBadge);
   }
 
+  function runSplashScreen() {
+    return new Promise((resolve) => {
+      const splash = $("vuel-splash-screen");
+      if (!splash) {
+        resolve();
+        return;
+      }
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        splash.classList.add("fade-out");
+        setTimeout(() => {
+          splash.classList.add("hidden");
+          resolve();
+        }, 450);
+      };
+      // Strictly under 5 seconds total (~3.9s including fade-out)
+      const timer = setTimeout(finish, 3450);
+      splash.addEventListener("click", () => {
+        clearTimeout(timer);
+        finish();
+      }, { once: true });
+    });
+  }
+
   async function init() {
     mistakes = await window.VuelStorage.loadMistakes();
     updateGemsUI(0);
@@ -1006,8 +1032,12 @@
     if (!profile.onboardingDone) {
       renderStageHeaderAndCharacter();
       updateCallControlsUI();
+      await runSplashScreen();
       openOnboardingModal();
     } else {
+      renderStageHeaderAndCharacter();
+      updateCallControlsUI();
+      await runSplashScreen();
       startScenario(profile.activeScenarioId || "grocery_store", true);
     }
   }
