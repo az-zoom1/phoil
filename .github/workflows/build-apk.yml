@@ -43,10 +43,34 @@ jobs:
             npx cap add android
           fi
           npx cap sync android
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST" ] && ! grep -q "RECORD_AUDIO" "$MANIFEST"; then
-            sed -i 's|<uses-permission android:name="android.permission.INTERNET" />|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />|' "$MANIFEST"
-          fi
+          cp capacitor-native/MainActivity.java android/app/src/main/java/com/aistudio/vuel/kzmprq/MainActivity.java
+          mkdir -p android/app/src/main/res/xml
+          cp app/src/main/res/xml/network_security_config.xml android/app/src/main/res/xml/network_security_config.xml
+          rm -f android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml android/app/src/main/res/mipmap-*/ic_launcher_foreground.png
+          cp app/src/main/res/drawable/vuel_icon_fg_1794849608305.jpg android/app/src/main/res/drawable/
+          cp app/src/main/res/drawable/ic_launcher_foreground.xml android/app/src/main/res/drawable/
+          cp app/src/main/res/drawable/ic_launcher_background.xml android/app/src/main/res/drawable/
+          cp -r app/src/main/res/mipmap-* android/app/src/main/res/
+          python3 - <<'EOF'
+          import pathlib
+          p = pathlib.Path("android/app/src/main/AndroidManifest.xml")
+          txt = p.read_text(encoding="utf-8")
+          perms = (
+              '    <uses-permission android:name="android.permission.INTERNET" />\n'
+              '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n'
+              '    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n'
+              '    <queries>\n'
+              '        <intent><action android:name="android.speech.RecognitionService" /></intent>\n'
+              '        <intent><action android:name="android.speech.action.RECOGNIZE_SPEECH" /></intent>\n'
+              '        <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>\n'
+              '    </queries>'
+          )
+          if "RECORD_AUDIO" not in txt:
+              txt = txt.replace('<uses-permission android:name="android.permission.INTERNET" />', perms, 1)
+          if "networkSecurityConfig" not in txt:
+              txt = txt.replace('<application', '<application\n        android:networkSecurityConfig="@xml/network_security_config"', 1)
+          p.write_text(txt, encoding="utf-8")
+          EOF
 
       - name: Build Debug APK
         run: |

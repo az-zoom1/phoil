@@ -2,13 +2,16 @@ package com.example
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.media.AudioAttributes
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -66,6 +69,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var curriculumWebView: WebView? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    private var pendingSpeakText: String? = null
+    private var pendingSpeakLang: String = "en-US"
+    private var pendingSpeakRate: Float = 1.0f
+    private var pendingSpeakId: String = ""
+
     private var speechRecognizer: SpeechRecognizer? = null
     private var pendingSttLang: String? = null
     private var lastRmsEmitMs = 0L
@@ -79,10 +87,25 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     ) { granted ->
         val lang = pendingSttLang
         pendingSttLang = null
-        if (granted && lang != null) {
-            startSpeechRecognizerInternal(lang)
-        } else if (!granted) {
+        if (granted) {
+            emitSttEvent("permission_granted", "")
+            if (lang != null) {
+                startSpeechRecognizerInternal(lang)
+            }
+        } else {
             emitSttEvent("error", "permission_denied")
+        }
+    }
+
+    private val speechIntentFallbackLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val text = matches?.firstOrNull() ?: ""
+            emitSttEvent("result", text)
+        } else {
+            emitSttEvent("error", "code_7")
         }
     }
 
@@ -132,6 +155,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             ttsReady = true
+            try {
+                val attrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+                tts?.setAudioAttributes(attrs)
+            } catch (_: Exception) {}
+
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     emitTtsEvent("start", utteranceId ?: "", -1, -1)
@@ -158,6 +189,39 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     emitTtsEvent("end", utteranceId ?: "", -1, -1)
                 }
             })
+
+            val queued = pendingSpeakText
+            if (queued != null) {
+                pendingSpeakText = null
+                speakInternal(queued, pendingSpeakLang, pendingSpeakRate, pendingSpeakId)
+            }
+        }
+    }
+
+    private fun speakInternal(text: String, lang: String, rate: Float, utteranceId: String) {
+        runOnUiThread {
+            val engine = tts
+            if (!ttsReady || engine == null) return@runOnUiThread
+            try {
+                val locale = if (lang.startsWith("ar")) Locale("ar") else Locale.US
+                val res = engine.setLanguage(locale)
+                if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    val fb = engine.setLanguage(Locale.ENGLISH)
+                    if (fb == TextToSpeech.LANG_MISSING_DATA || fb == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        engine.setLanguage(Locale.getDefault())
+                    }
+                }
+                engine.setSpeechRate(rate.coerceIn(0.5f, 1.5f))
+                val params = Bundle().apply {
+                    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+                }
+                val status = engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+                if (status == TextToSpeech.ERROR) {
+                    emitTtsEvent("end", utteranceId, -1, -1)
+                }
+            } catch (_: Exception) {
+                emitTtsEvent("end", utteranceId, -1, -1)
+            }
         }
     }
 
@@ -185,13 +249,28 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     private fun startSpeechRecognizerInternal(lang: String) {
         runOnUiThread {
-            if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-                emitSttEvent("error", "unavailable")
-                return@runOnUiThread
-            }
             try {
-                speechRecognizer?.destroy()
-                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                speechRecognizer?.let { existing ->
+                    try { existing.cancel() } catch (_: Exception) {}
+                    try { existing.destroy() } catch (_: Exception) {}
+                }
+                speechRecognizer = null
+
+                val recognizer = when {
+                    SpeechRecognizer.isRecognitionAvailable(this) ->
+                        SpeechRecognizer.createSpeechRecognizer(this)
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        SpeechRecognizer.isOnDeviceRecognitionAvailable(this) ->
+                        SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+                    else -> null
+                }
+
+                if (recognizer == null) {
+                    emitSttEvent("error", "recognizer_unavailable")
+                    return@runOnUiThread
+                }
+
+                speechRecognizer = recognizer.apply {
                     setRecognitionListener(object : RecognitionListener {
                         override fun onReadyForSpeech(params: Bundle?) {
                             emitSttEvent("ready", "")
@@ -245,8 +324,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1400L)
                 }
                 speechRecognizer?.startListening(intent)
-            } catch (e: Exception) {
-                emitSttEvent("error", e.message ?: "stt_exception")
+            } catch (_: Exception) {
+                emitSttEvent("error", "recognizer_unavailable")
             }
         }
     }
@@ -272,20 +351,29 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
 
         @JavascriptInterface
-        fun speak(text: String, lang: String, rate: Float, utteranceId: String): Boolean {
-            if (!ttsReady || tts == null) return false
+        fun requestMicPermission() {
             runOnUiThread {
-                val locale = if (lang.startsWith("ar")) Locale("ar") else Locale.US
-                tts?.language = locale
-                tts?.setSpeechRate(rate.coerceIn(0.5f, 1.5f))
-                val params = Bundle()
-                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+                requestMicPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
+        }
+
+        @JavascriptInterface
+        fun speak(text: String, lang: String, rate: Float, utteranceId: String): Boolean {
+            if (tts == null) return false
+            if (!ttsReady) {
+                pendingSpeakText = text
+                pendingSpeakLang = lang
+                pendingSpeakRate = rate
+                pendingSpeakId = utteranceId
+                return true
+            }
+            speakInternal(text, lang, rate, utteranceId)
             return true
         }
 
         @JavascriptInterface
         fun stopSpeaking() {
+            pendingSpeakText = null
             runOnUiThread {
                 tts?.stop()
                 emitTtsEvent("end", "", -1, -1)
@@ -300,9 +388,27 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             ) == PackageManager.PERMISSION_GRANTED
             if (!granted) {
                 pendingSttLang = lang
-                requestMicPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                runOnUiThread {
+                    requestMicPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
             } else {
                 startSpeechRecognizerInternal(lang)
+            }
+        }
+
+        @JavascriptInterface
+        fun launchVoicePrompt(lang: String) {
+            runOnUiThread {
+                try {
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, "تحدث بالإنجليزية الآن • Speak now")
+                    }
+                    speechIntentFallbackLauncher.launch(intent)
+                } catch (_: Exception) {
+                    emitSttEvent("error", "recognizer_unavailable")
+                }
             }
         }
 

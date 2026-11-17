@@ -203,13 +203,20 @@
       }
     }
 
-    // 2) Web Speech API
+    // 2) Web Speech API (Browser / Desktop fallback)
     if (window.speechSynthesis) {
       try {
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(cleanText);
         utter.lang = lang;
         utter.rate = rate || 1.0;
+
+        try {
+          const voices = window.speechSynthesis.getVoices() || [];
+          const prefix = String(lang || "en").slice(0, 2).toLowerCase();
+          const match = voices.find((v) => v.lang && v.lang.toLowerCase().startsWith(prefix));
+          if (match) utter.voice = match;
+        } catch (_) {}
 
         utter.onstart = () => {
           if (activeUtteranceId !== uttId) return;
@@ -235,6 +242,15 @@
         };
 
         window.speechSynthesis.speak(utter);
+        if (typeof window.speechSynthesis.resume === "function") {
+          window.speechSynthesis.resume();
+        }
+        startFallbackWordTicker();
+        safetyWatchdogTimer = setTimeout(() => {
+          if (activeUtteranceId === uttId && isTtsPlaying) {
+            freezeSpeechAndMouth(null, true);
+          }
+        }, Math.max(7000, cleanText.length * 145));
         return;
       } catch (_) {}
     }
@@ -272,6 +288,36 @@
     }
   };
 
+  function hasMicPermission() {
+    if (window.VuelBridge && typeof window.VuelBridge.hasMicPermission === "function") {
+      try { return Boolean(window.VuelBridge.hasMicPermission()); } catch (_) {}
+    }
+    return true;
+  }
+
+  function requestMicPermission() {
+    if (window.VuelBridge && typeof window.VuelBridge.requestMicPermission === "function") {
+      try {
+        window.VuelBridge.requestMicPermission();
+        return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  function launchVoicePrompt(callbacks, lang = "en-US") {
+    sttCallbacks = callbacks;
+    isSttActive = true;
+    if (window.VuelBridge && typeof window.VuelBridge.launchVoicePrompt === "function") {
+      try {
+        window.VuelBridge.launchVoicePrompt(lang);
+        return true;
+      } catch (_) {}
+    }
+    isSttActive = false;
+    return false;
+  }
+
   function startListening(callbacks, lang = "en-US") {
     sttCallbacks = callbacks;
     isSttActive = true;
@@ -284,7 +330,7 @@
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRec) {
       isSttActive = false;
-      callbacks.onError && callbacks.onError("unavailable");
+      callbacks.onError && callbacks.onError("recognizer_unavailable");
       return false;
     }
 
@@ -349,7 +395,9 @@
 
   window.__vuelNativeSttEvent = function (type, payload) {
     if (!sttCallbacks) return;
-    if (type === "ready") {
+    if (type === "permission_granted") {
+      sttCallbacks.onPermissionGranted && sttCallbacks.onPermissionGranted();
+    } else if (type === "ready") {
       sttCallbacks.onReady && sttCallbacks.onReady();
     } else if (type === "rms") {
       sttCallbacks.onRms && sttCallbacks.onRms(parseFloat(payload) || 0);
@@ -387,7 +435,10 @@
     stopSpeaking,
     freezeMouthOnStreamDrop: () => freezeSpeechAndMouth("توقف البث - فم مغلق", false),
     startListening,
+    launchVoicePrompt,
     stopListening,
+    hasMicPermission,
+    requestMicPermission,
     setBadgeState,
     isSpeaking: () => isTtsPlaying,
     isListening: () => isSttActive,

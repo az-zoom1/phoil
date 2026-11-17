@@ -18,6 +18,7 @@
   // Google-Live Call States
   let liveCallActive = true;
   let isMuted = false;
+  let inlineRecognizerSupported = true;
   let autoListenRetryTimer = null;
   let consecutiveMicErrors = 0;
   let callSeconds = 0;
@@ -158,7 +159,14 @@
 
       const heardPill = $("live-heard-pill");
       window.VuelSpeech.startListening({
+        onPermissionGranted: () => {
+          consecutiveMicErrors = 0;
+          liveCallActive = true;
+          isMuted = false;
+          updateCallControlsUI();
+        },
         onReady: () => {
+          inlineRecognizerSupported = true;
           consecutiveMicErrors = 0;
           if (!isMuted && liveCallActive) {
             window.VuelSpeech.setBadgeState("listening", "🎙️ يستمع لك الآن...");
@@ -201,16 +209,26 @@
           const ring = $("call-halo-ring");
           if (ring) ring.style.transform = "";
           consecutiveMicErrors++;
-          if (err === "permission_denied" || err === "not-allowed" || err === "unavailable") {
+
+          if (err === "permission_denied" || err === "not-allowed" || (err === "code_9" && !window.VuelSpeech.hasMicPermission())) {
             liveCallActive = false;
             updateCallControlsUI();
-            showToast("يرجى السماح بإذن الميكروفون أو الكتابة في المربع بالأسفل 🎙️");
+            showToast("يرجى منح إذن الميكروفون ثم الضغط على بدء المكالمة 🎙️");
             return;
           }
+
+          if (err === "recognizer_unavailable" || err === "unavailable") {
+            inlineRecognizerSupported = false;
+            liveCallActive = false;
+            updateCallControlsUI();
+            window.VuelSpeech.setBadgeState("idle", "اضغط 🎙️ للتحدث أو اكتب بالأسفل");
+            return;
+          }
+
           if (consecutiveMicErrors < 4 && liveCallActive && !isMuted) {
-            scheduleAutoListen(800);
+            scheduleAutoListen(900);
           } else {
-            window.VuelSpeech.setBadgeState("idle", "جاهز للمكالمة");
+            window.VuelSpeech.setBadgeState("idle", "اضغط زر المكالمة لإعادة الاستماع 🎙️");
           }
         },
         onEnd: () => {
@@ -810,6 +828,10 @@
 
     // Mute / Unmute Mic (prevents interrupting Vuel)
     $("btn-mute-call").addEventListener("click", () => {
+      if (!window.VuelSpeech.hasMicPermission()) {
+        window.VuelSpeech.requestMicPermission();
+        return;
+      }
       isMuted = !isMuted;
       if (isMuted) {
         clearTimeout(autoListenRetryTimer);
@@ -817,16 +839,38 @@
         showToast("🔇 تم كتم الميكروفون — لن تقاطع فويل");
       } else {
         showToast("🎙️ تم فتح الميكروفون للمكالمة المباشرة");
-        if (liveCallActive && !window.VuelSpeech.isSpeaking()) {
+        if (!inlineRecognizerSupported) {
+          window.VuelSpeech.launchVoicePrompt({
+            onResult: (txt) => { if (txt && txt.trim()) handleUserMessage(txt.trim()); },
+            onError: () => showToast("تحدث أو اكتب في المربع بالأسفل ✍️")
+          }, "en-US");
+        } else if (liveCallActive && !window.VuelSpeech.isSpeaking()) {
           scheduleAutoListen(150);
         }
       }
       updateCallControlsUI();
     });
 
-    // Toggle Continuous Google-Live Call Mode
+    // Toggle Continuous Google-Live Call Mode (or Voice Prompt fallback)
     $("btn-toggle-call").addEventListener("click", () => {
+      if (!window.VuelSpeech.hasMicPermission()) {
+        window.VuelSpeech.requestMicPermission();
+        return;
+      }
+      if (!inlineRecognizerSupported) {
+        isMuted = false;
+        const launched = window.VuelSpeech.launchVoicePrompt({
+          onResult: (txt) => { if (txt && txt.trim()) handleUserMessage(txt.trim()); },
+          onError: () => showToast("يمكنك التحدث أو الكتابة في المربع بالأسفل ✍️")
+        }, "en-US");
+        if (!launched) {
+          showToast("اكتب رسالتك في المربع بالأسفل للتحدث مع فويل ✍️");
+        }
+        return;
+      }
+
       liveCallActive = !liveCallActive;
+      consecutiveMicErrors = 0;
       if (liveCallActive) {
         isMuted = false;
         showToast("📞 المكالمة المباشرة مفعّلة");
@@ -961,11 +1005,24 @@
       window.VuelSpeech.speakWithKaraoke($("placement-question-text").textContent, [], getSpeechRate(), "en-US");
     });
     $("btn-placement-mic").addEventListener("click", () => {
-      window.VuelSpeech.startListening({
+      const micCallbacks = {
         onPartial: (t) => { $("placement-answer-input").value = t; },
         onResult: (t) => { $("placement-answer-input").value = t; },
-        onError: () => showToast("اكتب إجابتك بالإنجليزية للمتابعة")
-      }, "en-US");
+        onError: (err) => {
+          if (err === "recognizer_unavailable" || err === "unavailable") {
+            const ok = window.VuelSpeech.launchVoicePrompt({
+              onResult: (t) => { $("placement-answer-input").value = t; },
+              onError: () => showToast("اكتب إجابتك بالإنجليزية للمتابعة")
+            }, "en-US");
+            if (!ok) showToast("اكتب إجابتك بالإنجليزية للمتابعة");
+          } else if (err === "permission_denied") {
+            showToast("يرجى منح إذن الميكروفون أو كتابة إجابتك");
+          } else {
+            showToast("اكتب إجابتك بالإنجليزية للمتابعة");
+          }
+        }
+      };
+      window.VuelSpeech.startListening(micCallbacks, "en-US");
     });
     $("btn-placement-submit").addEventListener("click", submitPlacementAnswer);
 
