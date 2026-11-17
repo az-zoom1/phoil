@@ -838,12 +838,6 @@
       });
       outfitGrid.appendChild(item);
     });
-
-    const currentUrl = window.VuelConfig.getWorkerUrl();
-    $("worker-url-input").value = currentUrl === window.VuelConfig.DEFAULT_WORKER_URL && currentUrl.includes("PUT_YOUR")
-      ? ""
-      : currentUrl;
-    $("curriculum-url-input").value = window.VuelConfig.getCurriculumUrl();
   }
 
   function openOnboardingModal() {
@@ -1138,17 +1132,6 @@
     $("btn-placement-submit").addEventListener("click", submitPlacementAnswer);
 
     // Settings
-    $("btn-save-worker").addEventListener("click", () => {
-      const val = $("worker-url-input").value.trim();
-      window.VuelConfig.setWorkerUrl(val);
-      updateConnectionBadge();
-      showToast(val ? "تم حفظ رابط Cloudflare Worker بنجاح ✓" : "تمت العودة للإعداد الافتراضي");
-    });
-    $("btn-save-curriculum-url").addEventListener("click", () => {
-      const val = $("curriculum-url-input").value.trim();
-      window.VuelConfig.setCurriculumUrl(val);
-      showToast("تم حفظ رابط تبويب مناهج ✓");
-    });
     $("btn-retake-placement").addEventListener("click", openOnboardingModal);
     $("btn-reset-data").addEventListener("click", () => {
       profile = window.VuelStorage.clearAllData();
