@@ -1,41 +1,37 @@
 /**
- * Vuel (فويل) - Cloudflare Worker SSE Client + Adaptive AI Teaching Engine
- * Supports:
- *  - Lightweight streaming POST to WORKER_URL (SSE or chunked JSON)
- *  - Network-drop / stall watchdog that freezes SVG mouth immediately
- *  - Local Memory context injection (Name, Age, Level, Gems, Interests)
- *  - Intelligent Offline Fallback Engine when offline or WORKER_URL not yet set
+ * Vuel (فويل) - Intelligent Conversational AI Client + Adaptive Offline Engine
  */
 (function () {
   function buildSystemPrompt(profile, scenario, recentMistakes) {
     const levelDesc =
       profile.level === "advanced"
-        ? "ADVANCED MODE: Converse strictly in natural, rich English. Only use Arabic if the student explicitly asks 'ما معنى هذه؟' or asks for translation, then immediately return to English."
-        : "BEGINNER MODE: Speak simple, clear English sentences (1-2 sentences). If the student makes ANY grammar, tense, or vocabulary mistake, warmly explain and correct it in Arabic first, show the exact correct English sentence, and encourage them to repeat it in English.";
+        ? "ADVANCED MODE: Converse naturally in fluent English. ONLY use Arabic if the user says they don't understand ('I am not understand', 'I don't understand', 'ما معنى هذه؟'), then gently clarify in Arabic and return smoothly to English."
+        : "BEGINNER MODE: Speak short, clear, warm English (1-2 sentences). ALWAYS understand and respond directly to what the user JUST said first! If they say 'I am not understand' or seem confused, explain the previous point warmly in Arabic and say it more simply. If they make a grammar mistake (like 'I am not understand' -> 'I don't understand'), gently correct it in Arabic and encourage them to repeat.";
 
     const memoryLines = [
       profile.name ? `Student Name: ${profile.name}` : null,
       profile.age ? `Student Age: ${profile.age}` : null,
-      `English Level: ${profile.level}`,
+      `Level: ${profile.level}`,
       `Gems: ${profile.gems}`,
       profile.interests && profile.interests.length
         ? `Interests: ${profile.interests.join(", ")}`
         : null,
       recentMistakes && recentMistakes.length
-        ? `Recent mistakes to watch gently: ${recentMistakes.slice(0, 3).map((m) => m.wrong + " -> " + m.correct).join("; ")}`
+        ? `Recent mistakes: ${recentMistakes.slice(0, 3).map((m) => m.wrong + " -> " + m.correct).join("; ")}`
         : null
     ]
       .filter(Boolean)
       .join(" | ");
 
-    return `You are Vuel (فويل), an expressive, encouraging AI English tutor roleplaying in the scenario "${scenario.titleEn}" (${scenario.titleAr}).
+    return `You are Vuel (فويل), a warm, super attentive live-call AI English tutor in the roleplay scenario "${scenario.titleEn}" (${scenario.titleAr}).
 ${levelDesc}
-Student Memory Context: ${memoryLines}
-Rules:
-1. Keep replies concise (under 45 words of spoken English) for fast mobile streaming and TTS.
-2. Put your spoken English response FIRST, then if helpful in Beginner mode (or when explaining a mistake/translation), put a short Arabic note on a new line prefixed with "AR:".
-3. If the student reveals their name, age, or interests, append a hidden tag at the very end: [[PROFILE:{"name":"...","age":"...","interests":["..."]}]]
-4. If the student made an English mistake that should be saved to their review deck, append at the very end: [[MISTAKE:{"wrong":"...","correct":"...","explanationAr":"..."}]]`;
+Student Context: ${memoryLines}
+CRITICAL LIVE-CALL RULES:
+1. Listen carefully to the student's actual message! Never ignore what they asked or said just to jump to a scripted question.
+2. Keep spoken English natural and concise (1-2 sentences, max 40 words) so it sounds great on a live voice call.
+3. Put spoken English FIRST. If Arabic help/correction/translation is needed, put it on a new line prefixed with "AR:".
+4. If the student shares their name, age, or hobbies, append silently at the end: [[PROFILE:{"name":"...","age":"...","interests":["..."]}]]
+5. If the student made an English grammar/vocabulary mistake, append silently at the end: [[MISTAKE:{"wrong":"...","correct":"...","explanationAr":"..."}]]`;
   }
 
   function parseTaggedResponse(rawText) {
@@ -55,7 +51,6 @@ Rules:
       text = text.replace(misMatch[0], "").trim();
     }
 
-    // Split English speech vs AR: Arabic note
     let englishText = text;
     let arabicNote = "";
     const arIdx = text.indexOf("\nAR:");
@@ -71,12 +66,21 @@ Rules:
     return { englishText, arabicNote, profilePatch, mistakePatch };
   }
 
-  /**
-   * Common ESL error detector for offline / instant feedback mode.
-   */
   function detectCommonMistake(userText) {
     const t = String(userText || "").trim();
     const checks = [
+      {
+        re: /\bi\s+(?:am\s+not|no|not)\s+understand\b/i,
+        wrong: t,
+        correct: t.replace(/\bi\s+(?:am\s+not|no|not)\s+understand\b/i, "I don't understand"),
+        explanationAr: "للتعبير عن عدم الفهم بالإنجليزية لا نستخدم (am not) مع الفعل (understand)، بل نستخدم (don't): I don't understand."
+      },
+      {
+        re: /\bi\s+don't\s+understood\b/i,
+        wrong: t,
+        correct: t.replace(/\bunderstood\b/i, "understand"),
+        explanationAr: "بعد (don't) يأتي الفعل في صورته الأساسية بدون تصريف: I don't understand."
+      },
       {
         re: /\bi\s+goed\b/i,
         wrong: t,
@@ -96,6 +100,12 @@ Rules:
         explanationAr: "الفعل (agree) لا يحتاج (am) قبله؛ نقول مباشرة: I agree."
       },
       {
+        re: /\bi\s+am\s+(live|work|study|like|want)\b/i,
+        wrong: t,
+        correct: t.replace(/\bi\s+am\s+(live|work|study|like|want)\b/i, "I $1"),
+        explanationAr: "لا نضع (am) قبل الأفعال الأساسية مثل live/work/like؛ نقول مباشرة: I live / I work."
+      },
+      {
         re: /\bi\s+want\s+buy\b/i,
         wrong: t,
         correct: t.replace(/\bwant\s+buy\b/i, "want to buy"),
@@ -108,26 +118,28 @@ Rules:
         explanationAr: "مع (He / She) نستخدم (has) بدلاً من (have)."
       },
       {
+        re: /\bi\s+have\s+(\d+)\s+years?\b/i,
+        wrong: t,
+        correct: t.replace(/\bi\s+have\s+(\d+)\s+years?\b/i, "I am $1 years old"),
+        explanationAr: "لذكر العمر بالإنجليزية نستخدم (I am ... years old) وليس (I have)."
+      },
+      {
         re: /\bi\s+very\s+like\b/i,
         wrong: t,
         correct: t.replace(/\bi\s+very\s+like\b/i, "I really like"),
-        explanationAr: "في الإنجليزية لا نضع (very) قبل الفعل؛ نستخدم (really) مثل: I really like."
+        explanationAr: "قبل الفعل نستخدم (really) وليس (very): I really like."
+      },
+      {
+        re: /\bthanks\s+you\b/i,
+        wrong: t,
+        correct: t.replace(/\bthanks\s+you\b/i, "thank you"),
+        explanationAr: "نقول إما (Thank you) بدون s أو (Thanks) لوحدها."
       },
       {
         re: /\bhow\s+many\s+(money|water|milk|sugar|time)\b/i,
         wrong: t,
         correct: t.replace(/\bhow\s+many\b/i, "How much"),
-        explanationAr: "مع الأسماء غير المعدودة (money, water, time) نستخدم (How much) وليس (How many)."
-      },
-      {
-        re: /\byesterday\s+i\s+(go|eat|buy|see)\b/i,
-        wrong: t,
-        correct: t
-          .replace(/\bgo\b/i, "went")
-          .replace(/\beat\b/i, "ate")
-          .replace(/\bbuy\b/i, "bought")
-          .replace(/\bsee\b/i, "saw"),
-        explanationAr: "بما أن الجملة عن الأمس (yesterday)، نستخدم صيغة الماضي البسيط للفعل."
+        explanationAr: "مع الأسماء غير المعدودة نستخدم (How much) وليس (How many)."
       }
     ];
 
@@ -140,77 +152,115 @@ Rules:
   function generateOfflineReply({ userText, profile, scenario, history, lastAiText }) {
     const text = String(userText || "").trim();
     const lower = text.toLowerCase();
+    const mistake = detectCommonMistake(text);
+    const nameCall = profile.name ? `, ${profile.name}` : "";
 
-    // Check if user asks "ما معنى هذه؟" or translation in any mode
+    // 1) Comprehension / Confusion / Repeat intent (handles "I am not understand", "I don't understand", "what?", etc.)
+    if (/(?:not\s+understand|don't\s+understand|didn't\s+understand|no\s+understand|confused|repeat|say\s+that\s+again|slower|ما\s*فهمت|مش\s*فاهم|لم\s*أفهم|أعد|بطيء)/i.test(text)) {
+      const simplifiedAr = scenario.openingLineAr || "لا تقلق أبداً، سأشرح لك ببساطة!";
+      const hint = (scenario.hints && scenario.hints[0]) || "Yes, please.";
+      return {
+        englishText: `No worries${nameCall}! Let me make it simpler: "${lastAiText || scenario.openingLine}". You can answer: "${hint}"`,
+        arabicNote: mistake
+          ? `لا تقلق أبداً 😊: ${mistake.explanationAr} — ومعنى كلامي السابق هو: "${simplifiedAr}". جرّب أن تجيب بهذه الجملة السهلة: "${hint}"`
+          : `بكل سرور 😊 معنى ما قلته لك: "${simplifiedAr}". يمكنك الرد بسهولة: "${hint}"`,
+        mistakePatch: mistake,
+        gemsEarned: 5
+      };
+    }
+
+    // 2) Explicit Translation request ("ما معنى هذه؟")
     if (/ما معنى|ترجم|what does .* mean|meaning of/i.test(text)) {
       const wordMatch = text.match(/mean(?:ing)?(?:\s+of)?\s+["']?([a-zA-Z]+)["']?/i);
       const targetWord = wordMatch ? wordMatch[1] : "";
       if (targetWord && window.VuelDictionary) {
         const entry = window.VuelDictionary.lookup(targetWord);
         return {
-          englishText: `Let's continue our ${scenario.titleEn} practice! Try using "${targetWord}" in a sentence.`,
-          arabicNote: `معنى "${entry.word}" (${entry.arabicPhonetic}): ${entry.meaningAr}. والآن لنكمل بالإنجليزية!`,
+          englishText: `Great question! "${entry.word}" means ${entry.meaningAr}. Now let's continue in the ${scenario.titleEn}!`,
+          arabicNote: `معنى "${entry.word}" (${entry.arabicPhonetic}): ${entry.meaningAr}. والآن لنكمل الحوار بالإنجليزية!`,
           mistakePatch: null,
           gemsEarned: 5
         };
       }
       return {
-        englishText: `Sure! Let's keep practicing in the ${scenario.titleEn}. What would you say next?`,
-        arabicNote: `الترجمة: "${scenario.openingLineAr || lastAiText}" — يمكنك أيضاً الضغط على أي كلمة إنجليزية أعلاه لترجمتها فوراً!`,
+        englishText: `Of course! It means: ${scenario.openingLineAr || lastAiText}. Ready to reply in English?`,
+        arabicNote: `المقصود بالجملة: "${scenario.openingLineAr || lastAiText}" — ويمكنك الضغط على أي كلمة إنجليزية أعلاه لترجمتها فوراً!`,
         mistakePatch: null,
         gemsEarned: 5
       };
     }
 
-    // Check grammar mistake (especially in Beginner mode, or record in both)
-    const mistake = detectCommonMistake(text);
+    // 3) Grammar correction in Beginner mode (prioritize teaching warmly before continuing)
     if (mistake && profile.level === "beginner") {
       return {
-        englishText: `Nice try! Say it like this: "${mistake.correct}". Can you repeat that in English?`,
-        arabicNote: `تصحيح لطيف 🌟: ${mistake.explanationAr} الجملة الصحيحة هي: "${mistake.correct}". حاول تكرارها بالإنجليزية الآن!`,
+        englishText: `Good try${nameCall}! We say: "${mistake.correct}". Can you say that one more time?`,
+        arabicNote: `تصحيح ذكي 🌟: ${mistake.explanationAr} الجملة الصحيحة: "${mistake.correct}". كررها بصوتك الآن!`,
         mistakePatch: mistake,
         gemsEarned: 5
       };
     }
 
-    // If user wrote purely in Arabic (and didn't ask for translation)
+    // 4) Greetings & conversational small talk ("Hello", "How are you?", "My name is...")
+    if (/^(?:hello|hi|hey|good\s+morning|good\s+evening|how\s+are\s+you|peace|مرحبا|أهلا|السلام)/i.test(lower)) {
+      return {
+        englishText: `Hey${nameCall}! I'm doing awesome and super happy to talk with you! Back to our ${scenario.titleEn}—what would you like to say or ask first?`,
+        arabicNote: profile.level === "beginner"
+          ? `أهلاً بك${profile.name ? " يا " + profile.name : ""}! أنا بخير وسعيد بالتحدث معك. والآن لنكمل موقف (${scenario.titleAr}): ماذا تريد أن تقول أو تطلب؟`
+          : "",
+        mistakePatch: mistake,
+        gemsEarned: 8
+      };
+    }
+
+    // 5) Questions from user (How much, Where, Can I, What...)
+    if (/\?|^(?:how|what|where|when|why|can|could|do|does|is|are)\b/i.test(lower)) {
+      if (/how\s+much|price|cost/i.test(lower)) {
+        return {
+          englishText: `It is only five dollars today! Would you like to take it or see something else?`,
+          arabicNote: profile.level === "beginner" ? "السعر خمسة دولارات فقط اليوم! هل تود أخذه أم رؤية شيء آخر؟" : "",
+          mistakePatch: mistake,
+          gemsEarned: 10
+        };
+      }
+      if (/where/i.test(lower)) {
+        return {
+          englishText: `It is right over there on the second aisle to your left. Shall I show you?`,
+          arabicNote: profile.level === "beginner" ? "هو هناك مباشرة في الممر الثاني على يسارك. هل أريك إياه؟" : "",
+          mistakePatch: mistake,
+          gemsEarned: 10
+        };
+      }
+    }
+
+    // 6) Pure Arabic input -> help translate into English naturally
     const hasArabic = /[\u0600-\u06FF]/.test(text);
     const hasEnglish = /[a-zA-Z]{2,}/.test(text);
     if (hasArabic && !hasEnglish) {
       const hint = (scenario.hints && scenario.hints[0]) || "Could you help me, please?";
       return {
-        englishText: `Good thought! Try saying it in English: "${hint}"`,
-        arabicNote: `ممتاز! جرّب قولها بالإنجليزية الآن: "${hint}"`,
+        englishText: `Nice! Here is how you say that in English: "${hint}". Try saying it out loud!`,
+        arabicNote: `ممتاز! جرّب أن تنطقها بالإنجليزية هكذا: "${hint}"`,
         mistakePatch: null,
         gemsEarned: 5
       };
     }
 
-    // Advance natural scenario dialogue
+    // 7) Natural scenario continuation
     const turnCount = history.filter((m) => m.role === "user").length;
     const followUps = scenario.followUps || [];
     const followUp = followUps[turnCount % Math.max(1, followUps.length)] ||
-      `That sounds great${profile.name ? ", " + profile.name : ""}! Tell me a bit more about what you need here.`;
-
-    const praisePrefix =
-      profile.level === "advanced"
-        ? ""
-        : "Awesome! ";
+      `That sounds great${nameCall}! Tell me a bit more so we keep practicing.`;
 
     return {
-      englishText: praisePrefix + followUp,
+      englishText: (profile.level === "advanced" ? "" : `Well said${nameCall}! `) + followUp,
       arabicNote: profile.level === "beginner"
-        ? `أحسنت${profile.name ? " يا " + profile.name : ""}! جملتك ممتازة. أكمل المحادثة في سيناريو ${scenario.titleAr}.`
+        ? `ممتاز${profile.name ? " يا " + profile.name : ""}! جملتك طبيعية جداً. واصل الحوار في (${scenario.titleAr}).`
         : "",
       mistakePatch: mistake || null,
       gemsEarned: 10
     };
   }
 
-  /**
-   * Streams from Cloudflare Worker URL if configured & online,
-   * otherwise uses Offline Tutor seamlessly.
-   */
   async function sendTurn({ userText, profile, scenario, history, recentMistakes, lastAiText, onChunk, onNetworkDrop }) {
     const workerUrl = window.VuelConfig && window.VuelConfig.getWorkerUrl();
     const configured = window.VuelConfig && window.VuelConfig.isWorkerConfigured();
@@ -227,10 +277,9 @@ Rules:
     const resetStallWatchdog = () => {
       if (stallTimer) clearTimeout(stallTimer);
       stallTimer = setTimeout(() => {
-        // Network stalled mid-stream -> freeze SVG mouth immediately
         if (onNetworkDrop) onNetworkDrop();
         controller.abort();
-      }, 9000);
+      }, 9500);
     };
 
     try {
@@ -286,6 +335,7 @@ Rules:
       }
 
       if (stallTimer) clearTimeout(stallTimer);
+      if (!accumulated.trim()) throw new Error("Empty response");
       const parsed = parseTaggedResponse(accumulated);
       return {
         ...parsed,
@@ -295,15 +345,11 @@ Rules:
     } catch (_) {
       if (stallTimer) clearTimeout(stallTimer);
       if (onNetworkDrop) onNetworkDrop();
-      // Graceful fallback to offline engine so user is never stuck
       const offlineResult = generateOfflineReply({ userText, profile, scenario, history, lastAiText });
       return { ...offlineResult, mode: "offline-fallback" };
     }
   }
 
-  /**
-   * Evaluates the AI Quick Placement Test based on accuracy, vocabulary, and response speed.
-   */
   async function evaluatePlacementTest(answerText, elapsedSeconds) {
     const text = String(answerText || "").trim();
     const words = text.split(/\s+/).filter(Boolean);
@@ -334,7 +380,7 @@ Rules:
               level: parsed.level,
               gemsReward: isAdv ? 30 : 15,
               feedbackAr: parsed.feedbackAr || (isAdv
-                ? "ممتاز! أنت في المستوى المتقدم. تم فتح وضع المحادثة الحرة ومكافأتك بـ 30 جوهرة!"
+                ? "ممتاز! أنت في المستوى المتقدم. تم فتح وضع المكالمة المتقدمة ومكافأتك بـ 30 جوهرة!"
                 : "بداية رائعة! سنبدأ بالمستوى المبتدئ مع شرح دافئ بالعربية ومكافأة 15 جوهرة!")
             };
           }
@@ -342,7 +388,6 @@ Rules:
       } catch (_) {}
     }
 
-    // Local fast & accurate evaluator
     const score =
       (words.length >= 7 ? 2 : words.length >= 4 ? 1 : 0) +
       (!mistake ? 2 : 0) +

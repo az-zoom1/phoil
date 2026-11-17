@@ -1,5 +1,5 @@
 /**
- * Vuel (فويل) - Unified TTS / STT + Real-Time Lip-Sync & Karaoke Sync
+ * Vuel (فويل) - Unified TTS / STT + Real-Time Lip-Sync, Karaoke & Live Call Audio
  * Crucial Rule: Immediately freezes/closes the SVG mouth the moment TTS finishes,
  * stops, OR if the internet connection drops/stalls mid-stream.
  */
@@ -9,18 +9,44 @@
   let activeCharOffsets = [];
   let mouthCycleTimer = null;
   let fallbackWordTimer = null;
+  let safetyWatchdogTimer = null;
+  let activeTtsDoneCallback = null;
   let sttCallbacks = null;
   let networkOnline = navigator.onLine !== false;
   let isTtsPlaying = false;
+  let isSttActive = false;
 
-  const MOUTH_SEQUENCE = ["half", "open", "wide", "half", "open", "closed"];
+  const MOUTH_SEQUENCE = ["narrow", "half", "open", "wide", "round", "half", "narrow", "open", "closed"];
   let mouthSeqIndex = 0;
+
+  function setHaloState(mode) {
+    const ring = document.getElementById("call-halo-ring");
+    if (!ring) return;
+    ring.classList.remove("speaking", "listening", "muted");
+    if (mode === "speaking" || mode === "listening" || mode === "muted") {
+      ring.classList.add(mode);
+    }
+  }
 
   function setBadgeState(mode, label) {
     const el = document.getElementById("stage-speech-indicator");
-    if (!el) return;
-    el.className = "speech-badge " + mode;
-    el.textContent = label;
+    if (el) {
+      el.className = "speech-badge " + mode;
+      el.textContent = label;
+    }
+    if (mode === "speaking") {
+      setHaloState("speaking");
+      window.VuelCharacters && window.VuelCharacters.setBodyState("speaking");
+    } else if (mode === "listening") {
+      setHaloState("listening");
+      window.VuelCharacters && window.VuelCharacters.setBodyState("listening");
+    } else if (mode === "muted") {
+      setHaloState("muted");
+      window.VuelCharacters && window.VuelCharacters.setBodyState("idle");
+    } else {
+      setHaloState("idle");
+      window.VuelCharacters && window.VuelCharacters.setBodyState("idle");
+    }
   }
 
   function clearLipSyncTimers() {
@@ -32,9 +58,14 @@
       clearInterval(fallbackWordTimer);
       fallbackWordTimer = null;
     }
+    if (safetyWatchdogTimer) {
+      clearTimeout(safetyWatchdogTimer);
+      safetyWatchdogTimer = null;
+    }
   }
 
-  function freezeSpeechAndMouth(reasonLabel) {
+  function freezeSpeechAndMouth(reasonLabel, invokeDoneCallback) {
+    const wasPlaying = isTtsPlaying;
     isTtsPlaying = false;
     clearLipSyncTimers();
     if (window.VuelCharacters) {
@@ -43,10 +74,17 @@
     activeWordElements.forEach((el) => {
       el.classList.remove("word-active");
     });
+    toggleAudioButtons(false);
     if (reasonLabel) {
       setBadgeState("frozen", reasonLabel);
-    } else {
-      setBadgeState("idle", "جاهز للاستماع");
+    } else if (!isSttActive) {
+      setBadgeState("idle", "جاهز للمكالمة");
+    }
+
+    const cb = activeTtsDoneCallback;
+    activeTtsDoneCallback = null;
+    if (invokeDoneCallback && wasPlaying && typeof cb === "function") {
+      cb();
     }
   }
 
@@ -55,13 +93,13 @@
     mouthSeqIndex = 0;
     mouthCycleTimer = setInterval(() => {
       if (!isTtsPlaying) {
-        freezeSpeechAndMouth();
+        freezeSpeechAndMouth(null, false);
         return;
       }
       const state = MOUTH_SEQUENCE[mouthSeqIndex % MOUTH_SEQUENCE.length];
       mouthSeqIndex++;
       window.VuelCharacters && window.VuelCharacters.setMouthState(state);
-    }, 115);
+    }, 78);
   }
 
   function highlightWordAtCharIndex(charIndex) {
@@ -74,8 +112,9 @@
         break;
       }
     }
-    if (matchedIdx === -1) return;
-    highlightWordIndex(matchedIdx);
+    if (matchedIdx !== -1) {
+      highlightWordIndex(matchedIdx);
+    }
   }
 
   function highlightWordIndex(idx) {
@@ -83,7 +122,6 @@
       el.classList.toggle("word-active", i === idx);
       if (i < idx) el.classList.add("word-spoken");
     });
-    // Pulse mouth distinctly on every new word boundary
     if (isTtsPlaying && window.VuelCharacters) {
       window.VuelCharacters.setMouthState(idx % 2 === 0 ? "wide" : "open");
     }
@@ -110,21 +148,26 @@
     if (stopBtn) stopBtn.classList.toggle("hidden", !playing);
   }
 
-  function speakWithKaraoke(text, wordElements, rate, lang = "en-US") {
-    stopSpeaking();
+  function speakWithKaraoke(text, wordElements, rate, lang = "en-US", onFinished = null) {
+    stopSpeaking(true);
+    stopListening();
+
     const cleanText = String(text || "").trim();
-    if (!cleanText) return;
+    if (!cleanText) {
+      if (typeof onFinished === "function") onFinished();
+      return;
+    }
 
     activeWordElements = Array.isArray(wordElements) ? wordElements : [];
     activeCharOffsets = computeWordOffsets(cleanText);
+    activeTtsDoneCallback = onFinished;
     const uttId = "utt_" + Date.now();
     activeUtteranceId = uttId;
     isTtsPlaying = true;
     toggleAudioButtons(true);
-    setBadgeState("speaking", "يتحدث الآن...");
+    setBadgeState("speaking", "🔊 فويل يتحدث...");
     startMouthPulse();
 
-    // Estimate fallback karaoke timing in case platform TTS omits word boundaries
     let receivedNativeBoundary = false;
     const msPerWord = Math.round((60000 / 155) / (rate || 1));
     let fallbackIdx = 0;
@@ -143,25 +186,24 @@
         } else {
           clearInterval(fallbackWordTimer);
         }
-      }, Math.max(180, msPerWord));
+      }, Math.max(175, msPerWord));
     }
 
-    // 1) Prefer Android Native TTS Bridge for rock-solid WebView audio
+    // 1) Android Native TTS Bridge
     if (window.VuelBridge && typeof window.VuelBridge.speak === "function") {
       const ok = window.VuelBridge.speak(cleanText, lang, rate || 1.0, uttId);
       if (ok) {
         startFallbackWordTicker();
-        // Safety watchdog in case utterance hangs
-        setTimeout(() => {
+        safetyWatchdogTimer = setTimeout(() => {
           if (activeUtteranceId === uttId && isTtsPlaying) {
-            stopSpeaking();
+            freezeSpeechAndMouth(null, true);
           }
-        }, Math.max(8000, cleanText.length * 140));
+        }, Math.max(7000, cleanText.length * 140));
         return;
       }
     }
 
-    // 2) Fallback to Web Speech API (Desktop / Chrome / Capacitor)
+    // 2) Web Speech API
     if (window.speechSynthesis) {
       try {
         window.speechSynthesis.cancel();
@@ -184,14 +226,12 @@
 
         utter.onend = () => {
           if (activeUtteranceId !== uttId) return;
-          toggleAudioButtons(false);
-          freezeSpeechAndMouth();
+          freezeSpeechAndMouth(null, true);
         };
 
         utter.onerror = () => {
           if (activeUtteranceId !== uttId) return;
-          toggleAudioButtons(false);
-          freezeSpeechAndMouth();
+          freezeSpeechAndMouth(null, true);
         };
 
         window.speechSynthesis.speak(utter);
@@ -199,43 +239,42 @@
       } catch (_) {}
     }
 
-    // 3) Visual-only timed karaoke fallback if TTS engine is unavailable on device
+    // 3) Timed visual karaoke fallback
     startFallbackWordTicker();
-    const totalDuration = Math.max(1500, activeWordElements.length * msPerWord + 350);
-    setTimeout(() => {
+    const totalDuration = Math.max(1400, activeWordElements.length * msPerWord + 350);
+    safetyWatchdogTimer = setTimeout(() => {
       if (activeUtteranceId === uttId) {
-        toggleAudioButtons(false);
-        freezeSpeechAndMouth();
+        freezeSpeechAndMouth(null, true);
       }
     }, totalDuration);
   }
 
-  function stopSpeaking() {
+  function stopSpeaking(suppressCallback = false) {
+    if (suppressCallback) {
+      activeTtsDoneCallback = null;
+    }
     activeUtteranceId = null;
-    toggleAudioButtons(false);
     if (window.VuelBridge && typeof window.VuelBridge.stopSpeaking === "function") {
       try { window.VuelBridge.stopSpeaking(); } catch (_) {}
     }
     if (window.speechSynthesis) {
       try { window.speechSynthesis.cancel(); } catch (_) {}
     }
-    freezeSpeechAndMouth();
+    freezeSpeechAndMouth(null, false);
   }
 
-  // Called by Android Native Bridge
   window.__vuelNativeTtsEvent = function (type, id, start) {
     if (id && activeUtteranceId && id !== activeUtteranceId) return;
     if (type === "range" && start >= 0) {
       highlightWordAtCharIndex(start);
     } else if (type === "end") {
-      toggleAudioButtons(false);
-      freezeSpeechAndMouth();
+      freezeSpeechAndMouth(null, true);
     }
   };
 
-  // Speech-to-Text (STT)
   function startListening(callbacks, lang = "en-US") {
     sttCallbacks = callbacks;
+    isSttActive = true;
 
     if (window.VuelBridge && typeof window.VuelBridge.startListening === "function") {
       window.VuelBridge.startListening(lang);
@@ -244,75 +283,114 @@
 
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRec) {
-      callbacks.onError && callbacks.onError("Speech recognition unavailable on this browser");
+      isSttActive = false;
+      callbacks.onError && callbacks.onError("unavailable");
       return false;
     }
 
     try {
+      if (window.__activeWebRec) {
+        try { window.__activeWebRec.abort(); } catch (_) {}
+      }
       const rec = new SpeechRec();
       rec.lang = lang;
       rec.interimResults = true;
       rec.maxAlternatives = 1;
+      let gotResult = false;
+
       rec.onstart = () => callbacks.onReady && callbacks.onReady();
       rec.onresult = (e) => {
         const res = e.results[e.results.length - 1];
         const transcript = res[0].transcript;
         if (res.isFinal) {
+          gotResult = true;
+          isSttActive = false;
           callbacks.onResult && callbacks.onResult(transcript);
         } else {
           callbacks.onPartial && callbacks.onPartial(transcript);
         }
       };
-      rec.onerror = (e) => callbacks.onError && callbacks.onError(e.error || "mic_error");
-      rec.onend = () => callbacks.onEnd && callbacks.onEnd();
+      rec.onerror = (e) => {
+        isSttActive = false;
+        const code = e.error || "mic_error";
+        if (code === "no-speech" || code === "aborted") {
+          callbacks.onSilence && callbacks.onSilence(code);
+        } else {
+          callbacks.onError && callbacks.onError(code);
+        }
+      };
+      rec.onend = () => {
+        isSttActive = false;
+        if (!gotResult) {
+          callbacks.onEnd && callbacks.onEnd();
+        }
+      };
       rec.start();
       window.__activeWebRec = rec;
       return true;
     } catch (err) {
+      isSttActive = false;
       callbacks.onError && callbacks.onError(err.message);
       return false;
     }
   }
 
   function stopListening() {
+    isSttActive = false;
+    sttCallbacks = null;
     if (window.VuelBridge && typeof window.VuelBridge.stopListening === "function") {
       try { window.VuelBridge.stopListening(); } catch (_) {}
     }
     if (window.__activeWebRec) {
-      try { window.__activeWebRec.stop(); } catch (_) {}
+      try { window.__activeWebRec.abort(); } catch (_) {}
       window.__activeWebRec = null;
     }
   }
 
   window.__vuelNativeSttEvent = function (type, payload) {
     if (!sttCallbacks) return;
-    if (type === "ready") sttCallbacks.onReady && sttCallbacks.onReady();
-    else if (type === "partial") sttCallbacks.onPartial && sttCallbacks.onPartial(payload);
-    else if (type === "result") {
-      sttCallbacks.onResult && sttCallbacks.onResult(payload);
-      sttCallbacks.onEnd && sttCallbacks.onEnd();
+    if (type === "ready") {
+      sttCallbacks.onReady && sttCallbacks.onReady();
+    } else if (type === "rms") {
+      sttCallbacks.onRms && sttCallbacks.onRms(parseFloat(payload) || 0);
+    } else if (type === "partial") {
+      sttCallbacks.onPartial && sttCallbacks.onPartial(payload);
+    } else if (type === "result") {
+      isSttActive = false;
+      const cb = sttCallbacks;
+      sttCallbacks = null;
+      cb.onResult && cb.onResult(payload);
     } else if (type === "error") {
-      sttCallbacks.onError && sttCallbacks.onError(payload);
-      sttCallbacks.onEnd && sttCallbacks.onEnd();
+      isSttActive = false;
+      const cb = sttCallbacks;
+      sttCallbacks = null;
+      // code_6 = SPEECH_TIMEOUT, code_7 = NO_MATCH (normal silence in hands-free calls)
+      if (payload === "code_6" || payload === "code_7") {
+        cb.onSilence && cb.onSilence(payload);
+      } else {
+        cb.onError && cb.onError(payload);
+      }
     }
   };
 
-  // Monitor network drops to immediately freeze mouth during stalled streams
   window.addEventListener("offline", () => {
     networkOnline = false;
-    freezeSpeechAndMouth("انقطع الاتصال - توقف الفم");
+    freezeSpeechAndMouth("انقطع الاتصال - توقف الفم", false);
   });
   window.addEventListener("online", () => {
     networkOnline = true;
-    if (!isTtsPlaying) setBadgeState("idle", "جاهز للاستماع");
+    if (!isTtsPlaying && !isSttActive) setBadgeState("idle", "جاهز للمكالمة");
   });
 
   window.VuelSpeech = {
     speakWithKaraoke,
     stopSpeaking,
-    freezeMouthOnStreamDrop: () => freezeSpeechAndMouth("توقف البث - فم مغلق"),
+    freezeMouthOnStreamDrop: () => freezeSpeechAndMouth("توقف البث - فم مغلق", false),
     startListening,
     stopListening,
+    setBadgeState,
+    isSpeaking: () => isTtsPlaying,
+    isListening: () => isSttActive,
     isOnline: () => {
       if (window.VuelBridge && typeof window.VuelBridge.isOnline === "function") {
         try { return Boolean(window.VuelBridge.isOnline()); } catch (_) {}

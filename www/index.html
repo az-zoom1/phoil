@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#070B14" />
   <title>Vuel | فويل لتعلّم الإنجليزية بالذكاء الاصطناعي</title>
+  <link rel="icon" type="image/svg+xml" href="assets/vuel-icon.svg" />
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
@@ -13,19 +14,11 @@
     <header class="top-bar">
       <div class="brand-cluster">
         <div class="brand-logo" aria-hidden="true">
-          <svg viewBox="0 0 36 36" width="30" height="30">
-            <circle cx="18" cy="18" r="17" fill="#0D162B" stroke="#00E5FF" stroke-width="1.5"/>
-            <path d="M10 13 L14 16 L18 14 L22 16 L26 13 L24 23 L18 27 L12 23 Z" fill="#10B981" opacity="0.25"/>
-            <circle cx="13.5" cy="17" r="3" fill="#FBBF24"/>
-            <circle cx="22.5" cy="17" r="3" fill="#FBBF24"/>
-            <circle cx="13.5" cy="17" r="1.3" fill="#070B14"/>
-            <circle cx="22.5" cy="17" r="1.3" fill="#070B14"/>
-            <polygon points="18,19 16.3,22 19.7,22" fill="#00E5FF"/>
-          </svg>
+          <img src="assets/vuel-icon.svg" width="34" height="34" alt="Vuel" />
         </div>
         <div class="brand-text">
           <span class="brand-name">Vuel <small>فويل</small></span>
-          <span id="connection-badge" class="status-pill status-offline">وضع أوفلاين الذكي</span>
+          <span id="connection-badge" class="status-pill status-offline">أوفلاين الذكي</span>
         </div>
       </div>
 
@@ -42,8 +35,8 @@
 
     <!-- Main Dynamic View Container -->
     <main id="main-content" class="main-content">
-      <!-- Live Stage View -->
-      <section id="view-stage" class="view active" aria-label="المحادثة الحية">
+      <!-- Live Call Stage View (Google Live Style) -->
+      <section id="view-stage" class="view active" aria-label="المكالمة المباشرة">
         <div class="scenario-banner">
           <div class="scenario-banner-info">
             <span id="stage-scenario-emoji" class="scenario-emoji">🛒</span>
@@ -52,61 +45,115 @@
               <div id="stage-level-tag" class="scenario-meta">المستوى: مبتدئ • الشرح بالعربية</div>
             </div>
           </div>
-          <button id="btn-change-scenario" class="mini-outline-btn" type="button">تغيير السيناريو</button>
+          <div class="scenario-banner-btns">
+            <button id="btn-toggle-history" class="mini-outline-btn" type="button">📜 السجل</button>
+            <button id="btn-change-scenario" class="mini-outline-btn" type="button">السيناريو</button>
+          </div>
         </div>
 
-        <!-- Animated SVG Character Stage -->
-        <div class="character-stage" id="character-stage">
+        <!-- Hero Google-Live Character Call Area -->
+        <div class="character-stage live-call-hero" id="character-stage">
+          <div id="call-halo-ring" class="call-halo-ring"></div>
           <div class="stage-glow"></div>
-          <div class="stage-badges-row">
-            <span id="stage-char-name" class="stage-chip">فويل (البومة)</span>
-            <span id="stage-speech-indicator" class="speech-badge idle">جاهز للاستماع</span>
+
+          <!-- Phone-Call Caller Identity Header (Avatar + Name + Live Timer) -->
+          <div class="caller-header-pill">
+            <div class="caller-identity">
+              <div id="caller-avatar-mount" class="caller-avatar-circle" aria-hidden="true"></div>
+              <div class="caller-text-meta">
+                <div class="caller-name-row">
+                  <span id="stage-char-name" class="caller-name">فويل (البومة)</span>
+                  <span id="call-timer" class="call-timer">00:00</span>
+                </div>
+                <div id="call-wave-bars" class="call-wave-bars">
+                  <span></span><span></span><span></span><span></span><span></span>
+                </div>
+              </div>
+            </div>
+            <span id="stage-speech-indicator" class="speech-badge idle">جاهز للمكالمة</span>
           </div>
-          <div id="svg-character-mount" class="svg-character-mount" aria-label="الشخصية التفاعلية"></div>
-          <div class="stage-controls-overlay">
+
+          <div id="svg-character-mount" class="svg-character-mount hero-svg" aria-label="الشخصية التفاعلية"></div>
+
+          <!-- Live Heard Speech Preview -->
+          <div id="live-heard-pill" class="live-heard-pill hidden" dir="auto"></div>
+
+          <!-- Current Spoken Karaoke Subtitle Card -->
+          <div id="live-subtitle-card" class="live-subtitle-card">
+            <div id="live-subtitle-en" class="bubble-en-line" dir="ltr"></div>
+            <div id="live-subtitle-ar" class="live-subtitle-ar hidden"></div>
+            <div id="live-subtitle-corr" class="bubble-correction-box hidden"></div>
+            <div class="tap-hint-caption">اضغط على أي كلمة للترجمة الفورية والنطق</div>
+          </div>
+
+          <!-- Google-Live Call Control Bar -->
+          <div class="call-controls-bar">
+            <button id="btn-mute-call" class="call-ctrl-btn mute-btn" type="button" aria-label="كتم الميكروفون">
+              <span id="mute-icon">🎙️</span>
+              <span id="mute-label">المايك مفتوح</span>
+            </button>
+            <button id="btn-toggle-call" class="call-ctrl-btn live-btn active" type="button" aria-label="تشغيل أو إيقاف المكالمة المباشرة">
+              <span id="call-icon">📞</span>
+              <span id="call-label">مكالمة مباشرة</span>
+            </button>
             <button id="btn-replay-tts" class="icon-circle-btn" type="button" title="إعادة الاستماع" aria-label="إعادة الاستماع">🔊</button>
             <button id="btn-stop-tts" class="icon-circle-btn hidden" type="button" title="إيقاف الصوت" aria-label="إيقاف الصوت">⏹️</button>
           </div>
         </div>
 
-        <!-- Conversation Messages -->
-        <div id="chat-feed" class="chat-feed" role="log" aria-live="polite"></div>
+        <!-- Collapsible Transcript History Drawer -->
+        <div id="chat-history-drawer" class="chat-history-drawer hidden">
+          <div class="drawer-header">
+            <span>سجل المحادثة</span>
+            <button id="btn-close-history" class="mini-outline-btn" type="button">إغلاق ✕</button>
+          </div>
+          <div id="chat-feed" class="chat-feed" role="log" aria-live="polite"></div>
+        </div>
 
         <!-- Quick Smart Action Chips -->
         <div class="smart-actions-bar">
-          <button id="btn-smart-hint" class="action-chip chip-cyan" type="button">💡 تلميح ذكي (-5💎)</button>
-          <button id="btn-skip-question" class="action-chip chip-amber" type="button">⏭️ تجاوز السؤال (-10💎)</button>
+          <button id="btn-smart-hint" class="action-chip chip-cyan" type="button">💡 تلميح (-5💎)</button>
+          <button id="btn-skip-question" class="action-chip chip-amber" type="button">⏭️ تجاوز (-10💎)</button>
           <button id="btn-what-means" class="action-chip chip-violet" type="button">❓ ما معنى هذه؟</button>
         </div>
 
-        <!-- Input Bar -->
-        <form id="chat-form" class="chat-input-bar">
-          <button id="btn-mic" class="mic-btn" type="button" aria-label="تحدث بالإنجليزية" title="تحدث بالإنجليزية">
-            <span class="mic-icon">🎙️</span>
-          </button>
+        <!-- Compact Small Rectangle Input Bar at Bottom -->
+        <form id="chat-form" class="chat-input-bar compact-input-rect">
           <input
             id="chat-input"
             class="chat-input"
             type="text"
             dir="auto"
             autocomplete="off"
-            placeholder="اكتب بالإنجليزية أو اسأل بالعربية..."
+            placeholder="اكتب كلمة أو جملة هنا..."
           />
-          <button id="btn-send" class="send-btn" type="submit" aria-label="إرسال">إرسال</button>
+          <button id="btn-send" class="send-btn compact-send" type="submit" aria-label="إرسال">إرسال</button>
         </form>
       </section>
 
-      <!-- Scenarios Library View (50+ Scenarios) -->
+      <!-- Scenarios Library View (54 Scenarios) -->
       <section id="view-scenarios" class="view" aria-label="مكتبة السيناريوهات">
         <div class="section-header">
           <h2>مكتبة السيناريوهات <span id="scenarios-count-badge" class="count-badge">54</span></h2>
-          <p class="section-sub">اختر موقفاً حقيقياً لتبدأ المحادثة فوراً مع زيّ وشخصية مخصصة</p>
+          <p class="section-sub">اختر موقفاً حقيقياً لتبدأ المكالمة المباشرة فوراً</p>
         </div>
         <div class="search-box">
           <input id="scenario-search" type="search" placeholder="ابحث عن سيناريو (مطار، مطعم، مقابلة...)" />
         </div>
         <div id="category-pills" class="category-pills"></div>
         <div id="scenarios-grid" class="scenarios-grid"></div>
+      </section>
+
+      <!-- Curriculum Tab View (مناهج - azm-study.free.nf) -->
+      <section id="view-curriculum" class="view curriculum-view" aria-label="مناهج">
+        <div class="curriculum-topbar">
+          <span class="curriculum-title">📚 مناهج • <small dir="ltr">azm-study.free.nf</small></span>
+          <div class="curriculum-actions">
+            <button id="btn-reload-curriculum" class="mini-outline-btn" type="button">🔄 تحديث</button>
+            <button id="btn-open-curriculum-ext" class="mini-outline-btn" type="button">🌐 فتح خارجي</button>
+          </div>
+        </div>
+        <iframe id="curriculum-iframe" class="curriculum-iframe" title="مناهج الدراسة" loading="lazy"></iframe>
       </section>
 
       <!-- Offline Review Deck View -->
@@ -140,11 +187,16 @@
         </div>
 
         <div class="glass-card">
-          <h3>اتصال Cloudflare Worker & Gemini</h3>
-          <p class="muted-text">يمكنك وضع رابط Cloudflare Worker الخاص بك هنا أو داخل ملف <code>js/config.js</code>.</p>
+          <h3>إعدادات Cloudflare Worker & موقع المناهج</h3>
+          <p class="muted-text">رابط Cloudflare Worker (أو من ملف <code>www/js/config.js</code>):</p>
           <div class="worker-input-row">
-            <input id="worker-url-input" type="url" dir="ltr" placeholder="https://vuel-proxy.yourname.workers.dev" />
+            <input id="worker-url-input" type="url" dir="ltr" placeholder="https://vuel.azzamalmiklafi.workers.dev" />
             <button id="btn-save-worker" class="primary-btn" type="button">حفظ</button>
+          </div>
+          <p class="muted-text">رابط تبويب مناهج (<code>CURRICULUM_URL</code> في <code>www/js/config.js</code>):</p>
+          <div class="worker-input-row">
+            <input id="curriculum-url-input" type="url" dir="ltr" placeholder="https://azm-study.free.nf" />
+            <button id="btn-save-curriculum-url" class="primary-btn" type="button">حفظ</button>
           </div>
           <div class="settings-buttons-row">
             <button id="btn-retake-placement" class="secondary-btn" type="button">إعادة اختبار تحديد المستوى</button>
@@ -159,15 +211,19 @@
       </section>
     </main>
 
-    <!-- Bottom Navigation -->
+    <!-- Bottom Navigation (5 Tabs) -->
     <nav class="bottom-nav" aria-label="التنقل الرئيسي">
       <button class="nav-item active" data-view="stage" type="button">
-        <span class="nav-icon">🎙️</span>
-        <span class="nav-label">المحادثة</span>
+        <span class="nav-icon">📞</span>
+        <span class="nav-label">المكالمة</span>
       </button>
       <button class="nav-item" data-view="scenarios" type="button">
         <span class="nav-icon">🗺️</span>
         <span class="nav-label">السيناريوهات</span>
+      </button>
+      <button class="nav-item" data-view="curriculum" type="button">
+        <span class="nav-icon">📚</span>
+        <span class="nav-label">مناهج</span>
       </button>
       <button class="nav-item" data-view="review" type="button">
         <span class="nav-icon">🃏</span>
@@ -213,7 +269,7 @@
           <button id="btn-level-advanced" class="level-choice-card" type="button">
             <span class="choice-badge cyan">متقدم • Advanced</span>
             <strong>أتحدث بطلاقة وأريد الممارسة</strong>
-            <small>محادثة إنجليزية كاملة مع ترجمة فورية عند الضغط على أي كلمة</small>
+            <small>مكالمة إنجليزية كاملة مع ترجمة فورية عند الضغط على أي كلمة</small>
           </button>
           <button id="btn-start-placement" class="level-choice-card placement-highlight" type="button">
             <span class="choice-badge amber">⚡ اختبار سريع بالذكاء الاصطناعي</span>
@@ -252,7 +308,7 @@
     <div id="toast" class="toast hidden" role="status"></div>
   </div>
 
-  <!-- Scripts in strict dependency order (no ES module CORS issues on file://) -->
+  <!-- Scripts in strict dependency order -->
   <script src="js/config.js"></script>
   <script src="js/storage.js"></script>
   <script src="js/dictionary.js"></script>

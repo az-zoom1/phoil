@@ -1,5 +1,5 @@
 /**
- * Vuel (فويل) - Main Application Controller
+ * Vuel (فويل) - Google-Live Direct Call + Scenarios + Curriculum Tab Controller
  */
 (function () {
   let profile = window.VuelStorage.loadProfileSync();
@@ -15,6 +15,35 @@
   let flashcardIdx = 0;
   let isSending = false;
 
+  // Google-Live Call States
+  let liveCallActive = true;
+  let isMuted = false;
+  let autoListenRetryTimer = null;
+  let consecutiveMicErrors = 0;
+  let callSeconds = 0;
+  let callTimerInterval = null;
+
+  function formatDuration(sec) {
+    const m = String(Math.floor(sec / 60)).padStart(2, "0");
+    const s = String(sec % 60).padStart(2, "0");
+    return `${m}:${s}`;
+  }
+
+  function syncCallTimerRunning(running) {
+    if (running && !callTimerInterval) {
+      callTimerInterval = setInterval(() => {
+        if (liveCallActive && currentTab === "stage" && profile.onboardingDone) {
+          callSeconds++;
+          const el = $("call-timer");
+          if (el) el.textContent = formatDuration(callSeconds);
+        }
+      }, 1000);
+    } else if (!running && callTimerInterval) {
+      clearInterval(callTimerInterval);
+      callTimerInterval = null;
+    }
+  }
+
   const $ = (id) => document.getElementById(id);
 
   function showToast(msg) {
@@ -23,7 +52,15 @@
     el.textContent = msg;
     el.classList.remove("hidden");
     clearTimeout(window.__toastTimer);
-    window.__toastTimer = setTimeout(() => el.classList.add("hidden"), 2600);
+    window.__toastTimer = setTimeout(() => el.classList.add("hidden"), 2500);
+  }
+
+  function escapeHtml(str) {
+    return String(str || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
   function updateGemsUI(delta) {
@@ -47,7 +84,7 @@
     const configured = window.VuelConfig.isWorkerConfigured();
     if (online && configured) {
       badge.className = "status-pill status-online";
-      badge.textContent = "Worker متصل • بث مباشر";
+      badge.textContent = "Worker متصل • مكالمة ذكية";
     } else if (!online) {
       badge.className = "status-pill status-offline";
       badge.textContent = "أوفلاين • المعلّم المحلي";
@@ -68,6 +105,124 @@
     }
   }
 
+  function updateCallControlsUI() {
+    const muteBtn = $("btn-mute-call");
+    const muteIcon = $("mute-icon");
+    const muteLabel = $("mute-label");
+    if (muteBtn) muteBtn.classList.toggle("is-muted", isMuted);
+    if (muteIcon) muteIcon.textContent = isMuted ? "🔇" : "🎙️";
+    if (muteLabel) muteLabel.textContent = isMuted ? "مكتوم (لن تقاطع)" : "المايك مفتوح";
+
+    const callBtn = $("btn-toggle-call");
+    const callLabel = $("call-label");
+    if (callBtn) callBtn.classList.toggle("active", liveCallActive);
+    if (callLabel) callLabel.textContent = liveCallActive ? "مكالمة مباشرة" : "بدء المكالمة";
+    syncCallTimerRunning(liveCallActive);
+
+    const waveBars = $("call-wave-bars");
+    if (waveBars) {
+      waveBars.classList.toggle("active", liveCallActive && !isMuted);
+    }
+
+    if (isMuted) {
+      window.VuelSpeech.setBadgeState("muted", "🔇 الميكروفون مكتوم");
+    } else if (!liveCallActive && !window.VuelSpeech.isSpeaking()) {
+      window.VuelSpeech.setBadgeState("idle", "المكالمة متوقفة مؤقتاً");
+    }
+  }
+
+  function scheduleAutoListen(delayMs = 320) {
+    clearTimeout(autoListenRetryTimer);
+    if (
+      !liveCallActive ||
+      isMuted ||
+      currentTab !== "stage" ||
+      isSending ||
+      window.VuelSpeech.isSpeaking() ||
+      !profile.onboardingDone
+    ) {
+      return;
+    }
+
+    autoListenRetryTimer = setTimeout(() => {
+      if (
+        !liveCallActive ||
+        isMuted ||
+        currentTab !== "stage" ||
+        isSending ||
+        window.VuelSpeech.isSpeaking() ||
+        window.VuelSpeech.isListening()
+      ) {
+        return;
+      }
+
+      const heardPill = $("live-heard-pill");
+      window.VuelSpeech.startListening({
+        onReady: () => {
+          consecutiveMicErrors = 0;
+          if (!isMuted && liveCallActive) {
+            window.VuelSpeech.setBadgeState("listening", "🎙️ يستمع لك الآن...");
+          }
+        },
+        onRms: (rms) => {
+          const ring = $("call-halo-ring");
+          if (ring && !isMuted && window.VuelSpeech.isListening()) {
+            const scale = 1 + Math.min(0.18, Math.max(0, rms / 45));
+            ring.style.transform = `translate(-50%, -50%) scale(${scale.toFixed(2)})`;
+          }
+        },
+        onPartial: (txt) => {
+          if (heardPill && txt) {
+            heardPill.textContent = "🎙️ " + txt;
+            heardPill.classList.remove("hidden");
+          }
+        },
+        onResult: (txt) => {
+          if (heardPill) heardPill.classList.add("hidden");
+          const ring = $("call-halo-ring");
+          if (ring) ring.style.transform = "";
+          if (txt && txt.trim() && !isMuted) {
+            handleUserMessage(txt.trim());
+          } else {
+            scheduleAutoListen(300);
+          }
+        },
+        onSilence: () => {
+          if (heardPill) heardPill.classList.add("hidden");
+          const ring = $("call-halo-ring");
+          if (ring) ring.style.transform = "";
+          // Hands-free loop: quietly keep listening in Google-Live mode
+          if (liveCallActive && !isMuted && currentTab === "stage") {
+            scheduleAutoListen(350);
+          }
+        },
+        onError: (err) => {
+          if (heardPill) heardPill.classList.add("hidden");
+          const ring = $("call-halo-ring");
+          if (ring) ring.style.transform = "";
+          consecutiveMicErrors++;
+          if (err === "permission_denied" || err === "not-allowed" || err === "unavailable") {
+            liveCallActive = false;
+            updateCallControlsUI();
+            showToast("يرجى السماح بإذن الميكروفون أو الكتابة في المربع بالأسفل 🎙️");
+            return;
+          }
+          if (consecutiveMicErrors < 4 && liveCallActive && !isMuted) {
+            scheduleAutoListen(800);
+          } else {
+            window.VuelSpeech.setBadgeState("idle", "جاهز للمكالمة");
+          }
+        },
+        onEnd: () => {
+          if (heardPill) heardPill.classList.add("hidden");
+          if (liveCallActive && !isMuted && !window.VuelSpeech.isSpeaking() && !isSending && currentTab === "stage") {
+            scheduleAutoListen(400);
+          }
+        }
+      }, "en-US");
+    }, delayMs);
+  }
+
   function switchTab(tabName) {
     currentTab = tabName;
     document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
@@ -78,16 +233,51 @@
       btn.classList.toggle("active", btn.dataset.view === tabName);
     });
 
+    // Manage Curriculum native Android WebView vs Web iframe
+    const currUrl = window.VuelConfig.getCurriculumUrl();
+    if (tabName === "curriculum") {
+      clearTimeout(autoListenRetryTimer);
+      window.VuelSpeech.stopListening();
+      window.VuelSpeech.stopSpeaking(true);
+      if (window.VuelBridge && typeof window.VuelBridge.openCurriculum === "function") {
+        window.VuelBridge.openCurriculum(currUrl);
+      } else {
+        const iframe = $("curriculum-iframe");
+        if (iframe && iframe.src !== currUrl) iframe.src = currUrl;
+      }
+    } else {
+      if (window.VuelBridge && typeof window.VuelBridge.closeCurriculum === "function") {
+        window.VuelBridge.closeCurriculum();
+      }
+    }
+
+    if (tabName === "stage") {
+      if (liveCallActive && !isMuted && !window.VuelSpeech.isSpeaking()) {
+        scheduleAutoListen(350);
+      }
+    } else {
+      clearTimeout(autoListenRetryTimer);
+      window.VuelSpeech.stopListening();
+    }
+
     if (tabName === "review") renderReviewView();
     if (tabName === "profile") renderProfileView();
     if (tabName === "scenarios") renderScenariosGrid();
   }
 
-  // Android Back Button Handler
+  window.__vuelSwitchToStage = function () {
+    switchTab("stage");
+  };
+
   window.__vuelHandleBack = function () {
     const popup = $("word-popup");
     if (popup && !popup.classList.contains("hidden")) {
       popup.classList.add("hidden");
+      return true;
+    }
+    const drawer = $("chat-history-drawer");
+    if (drawer && !drawer.classList.contains("hidden")) {
+      drawer.classList.add("hidden");
       return true;
     }
     if (currentTab !== "stage") {
@@ -99,7 +289,6 @@
 
   function resolveOutfitForStage(scenario) {
     if (profile.activeOutfit && profile.activeOutfit !== "default" && profile.unlockedOutfits.includes(profile.activeOutfit)) {
-      // Allow equipped rare outfits (tech / royal) to shine across scenarios, otherwise match scenario outfit!
       if (profile.activeOutfit === "tech" || profile.activeOutfit === "royal") {
         return profile.activeOutfit;
       }
@@ -112,7 +301,7 @@
     $("stage-scenario-title").textContent = `${activeScenario.titleAr} • ${activeScenario.titleEn}`;
     $("stage-level-tag").textContent =
       profile.level === "advanced"
-        ? "المستوى: متقدم • محادثة إنجليزية + ترجمة بالضغط"
+        ? "المستوى: متقدم • مكالمة إنجليزية حرة"
         : "المستوى: مبتدئ • تصحيح وشرح بالعربية";
 
     const charId = profile.activeCharacter || activeScenario.character || "owl";
@@ -121,35 +310,34 @@
     $("stage-char-name").textContent = charMeta.nameAr;
 
     window.VuelCharacters.renderCharacter(charId, outfitId, $("svg-character-mount"));
+    window.VuelCharacters.renderCharacter(charId, outfitId, $("caller-avatar-mount"));
     window.VuelCharacters.freezeMouth();
   }
 
-  function createInteractiveEnglishNodes(englishText) {
-    const container = document.createElement("div");
-    container.className = "bubble-en-line";
-    container.dir = "ltr";
+  function createInteractiveEnglishNodes(englishText, containerEl) {
+    containerEl.innerHTML = "";
     const tokens = String(englishText || "").split(/(\s+)/);
     const wordEls = [];
 
     tokens.forEach((token) => {
       if (!token) return;
       if (/^\s+$/.test(token)) {
-        container.appendChild(document.createTextNode(token));
+        containerEl.appendChild(document.createTextNode(token));
       } else {
         const span = document.createElement("span");
         span.className = "vuel-word";
         span.textContent = token;
         span.dataset.word = token;
         span.addEventListener("click", () => openWordPopup(token));
-        container.appendChild(span);
+        containerEl.appendChild(span);
         wordEls.push(span);
       }
     });
 
-    return { container, wordEls };
+    return wordEls;
   }
 
-  function appendUserBubble(text) {
+  function appendUserBubbleToHistory(text) {
     const feed = $("chat-feed");
     const row = document.createElement("div");
     row.className = "bubble-row user";
@@ -162,54 +350,60 @@
     feed.scrollTop = feed.scrollHeight;
   }
 
-  function appendAiBubble({ englishText, arabicNote, mistakePatch, speakNow }) {
+  function renderAiTurn({ englishText, arabicNote, mistakePatch, speakNow }) {
+    // 1) Update Hero Live Subtitle Card directly below the character
+    const subEn = $("live-subtitle-en");
+    const subAr = $("live-subtitle-ar");
+    const subCorr = $("live-subtitle-corr");
+
+    const liveWordEls = createInteractiveEnglishNodes(englishText, subEn);
+
+    if (arabicNote) {
+      subAr.textContent = arabicNote;
+      subAr.classList.remove("hidden");
+    } else {
+      subAr.classList.add("hidden");
+    }
+
+    if (mistakePatch && mistakePatch.correct) {
+      subCorr.innerHTML = `✅ الصحيح: <span class="corr-good">${escapeHtml(mistakePatch.correct)}</span>`;
+      subCorr.classList.remove("hidden");
+    } else {
+      subCorr.classList.add("hidden");
+    }
+
+    // 2) Also append to collapsible history drawer
     const feed = $("chat-feed");
     const row = document.createElement("div");
     row.className = "bubble-row ai";
     const bubble = document.createElement("div");
     bubble.className = "bubble bubble-ai";
-
-    const { container, wordEls } = createInteractiveEnglishNodes(englishText);
-    bubble.appendChild(container);
-
-    const hintCaption = document.createElement("div");
-    hintCaption.className = "tap-hint-caption";
-    hintCaption.textContent = "اضغط على أي كلمة للترجمة الفورية والنطق";
-    bubble.appendChild(hintCaption);
-
+    const enHist = document.createElement("div");
+    enHist.className = "bubble-en-line";
+    enHist.dir = "ltr";
+    createInteractiveEnglishNodes(englishText, enHist);
+    bubble.appendChild(enHist);
     if (arabicNote) {
       const arDiv = document.createElement("div");
       arDiv.className = "bubble-ar-note";
       arDiv.textContent = arabicNote;
       bubble.appendChild(arDiv);
     }
-
-    if (mistakePatch && mistakePatch.correct) {
-      const corrDiv = document.createElement("div");
-      corrDiv.className = "bubble-correction-box";
-      corrDiv.innerHTML = `✅ الصحيح: <span class="corr-good">${escapeHtml(mistakePatch.correct)}</span>`;
-      bubble.appendChild(corrDiv);
-    }
-
     row.appendChild(bubble);
     feed.appendChild(row);
     feed.scrollTop = feed.scrollHeight;
 
     lastAiEnglishText = englishText;
-    window.__lastWordEls = wordEls;
+    window.__lastWordEls = liveWordEls;
 
     if (speakNow) {
-      window.VuelSpeech.speakWithKaraoke(englishText, wordEls, getSpeechRate(), "en-US");
+      window.VuelSpeech.speakWithKaraoke(englishText, liveWordEls, getSpeechRate(), "en-US", () => {
+        // Automatically open Mic right after Vuel finishes speaking (Google-Live loop)
+        scheduleAutoListen(300);
+      });
+    } else {
+      scheduleAutoListen(400);
     }
-    return { bubble, wordEls };
-  }
-
-  function escapeHtml(str) {
-    return String(str || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
   }
 
   function openWordPopup(rawToken) {
@@ -224,7 +418,10 @@
   }
 
   function startScenario(scenarioId, autoSpeak = true) {
-    window.VuelSpeech.stopSpeaking();
+    clearTimeout(autoListenRetryTimer);
+    window.VuelSpeech.stopListening();
+    window.VuelSpeech.stopSpeaking(true);
+
     activeScenario = window.VuelScenarios.getById(scenarioId);
     profile.activeScenarioId = activeScenario.id;
     profile = window.VuelStorage.saveProfileSync(profile);
@@ -232,36 +429,41 @@
     chatHistory = [];
     $("chat-feed").innerHTML = "";
     renderStageHeaderAndCharacter();
+    updateCallControlsUI();
 
     const opening = activeScenario.openingLine;
     const arNote = profile.level === "beginner" ? activeScenario.openingLineAr : "";
     chatHistory.push({ role: "assistant", englishText: opening });
 
-    appendAiBubble({
+    switchTab("stage");
+    renderAiTurn({
       englishText: opening,
       arabicNote: arNote,
       mistakePatch: null,
       speakNow: autoSpeak
     });
-
-    switchTab("stage");
   }
 
   async function handleUserMessage(rawText) {
     const text = String(rawText || "").trim();
     if (!text || isSending) return;
     isSending = true;
+    clearTimeout(autoListenRetryTimer);
+    window.VuelSpeech.stopListening();
+    window.VuelSpeech.stopSpeaking(true);
 
     $("chat-input").value = "";
-    window.VuelSpeech.stopSpeaking();
-    appendUserBubble(text);
+    appendUserBubbleToHistory(text);
     chatHistory.push({ role: "user", text });
 
-    // Silently extract user memory (Name, Age, Interests)
     profile = window.VuelStorage.extractAndMergeProfile(text, profile);
+    window.VuelSpeech.setBadgeState("idle", "جاري التفكير...");
+    window.VuelCharacters && window.VuelCharacters.setBodyState("thinking");
 
     const recentMistakes = mistakes.slice(0, 5);
-    let streamingRow = null;
+    const subEn = $("live-subtitle-en");
+    const subAr = $("live-subtitle-ar");
+    const subCorr = $("live-subtitle-corr");
 
     const result = await window.VuelAI.sendTurn({
       userText: text,
@@ -271,31 +473,14 @@
       recentMistakes,
       lastAiText: lastAiEnglishText,
       onChunk: (partialEnglish) => {
-        if (!streamingRow) {
-          const feed = $("chat-feed");
-          const row = document.createElement("div");
-          row.className = "bubble-row ai";
-          const bubble = document.createElement("div");
-          bubble.className = "bubble bubble-ai";
-          const enDiv = document.createElement("div");
-          enDiv.className = "bubble-en-line";
-          enDiv.dir = "ltr";
-          bubble.appendChild(enDiv);
-          row.appendChild(bubble);
-          feed.appendChild(row);
-          streamingRow = { row, enDiv };
-        }
-        streamingRow.enDiv.textContent = partialEnglish;
-        $("chat-feed").scrollTop = $("chat-feed").scrollHeight;
+        if (subEn) subEn.textContent = partialEnglish;
+        if (subAr) subAr.classList.add("hidden");
+        if (subCorr) subCorr.classList.add("hidden");
       },
       onNetworkDrop: () => {
         window.VuelSpeech.freezeMouthOnStreamDrop();
       }
     });
-
-    if (streamingRow) {
-      streamingRow.row.remove();
-    }
 
     if (result.profilePatch) {
       profile = window.VuelStorage.extractAndMergeProfile("", profile, result.profilePatch);
@@ -315,22 +500,22 @@
     if (profile.streak % 3 === 0) {
       updateGemsUI(earned + 5);
       showToast(`🔥 سلسلة رائعة! +${earned + 5} جوهرة 💎`);
+      window.VuelCharacters && window.VuelCharacters.setBodyState("happy");
     } else {
       updateGemsUI(earned);
     }
 
     chatHistory.push({ role: "assistant", englishText: result.englishText });
-    appendAiBubble({
+    isSending = false;
+
+    renderAiTurn({
       englishText: result.englishText,
       arabicNote: result.arabicNote,
       mistakePatch: result.mistakePatch,
       speakNow: true
     });
-
-    isSending = false;
   }
 
-  // Scenarios Library Rendering
   function renderCategoryPills() {
     const container = $("category-pills");
     container.innerHTML = "";
@@ -380,7 +565,6 @@
     });
   }
 
-  // Offline Review Deck Rendering
   async function renderReviewView() {
     mistakes = await window.VuelStorage.loadMistakes();
     const unmastered = mistakes.filter((m) => !m.mastered);
@@ -398,7 +582,7 @@
         <div class="flashcard">
           <div style="font-size:2rem;margin-bottom:6px">🌟</div>
           <strong>لا توجد أخطاء معلقة حالياً!</strong>
-          <p class="muted-text">ابدأ محادثة جديدة وأي تصحيح لغوي سيُحفظ هنا تلقائياً للمراجعة بدون إنترنت.</p>
+          <p class="muted-text">ابدأ مكالمة جديدة وأي تصحيح لغوي سيُحفظ هنا تلقائياً للمراجعة بدون إنترنت.</p>
         </div>`;
     } else {
       if (flashcardIdx >= unmastered.length) flashcardIdx = 0;
@@ -447,7 +631,6 @@
     });
   }
 
-  // Profile, AI Memory & Shop View
   function renderProfileView() {
     const interestsStr = profile.interests && profile.interests.length
       ? profile.interests.join("، ")
@@ -538,10 +721,13 @@
     $("worker-url-input").value = currentUrl === window.VuelConfig.DEFAULT_WORKER_URL && currentUrl.includes("PUT_YOUR")
       ? ""
       : currentUrl;
+    $("curriculum-url-input").value = window.VuelConfig.getCurriculumUrl();
   }
 
-  // Onboarding & AI Quick Placement Test
   function openOnboardingModal() {
+    clearTimeout(autoListenRetryTimer);
+    window.VuelSpeech.stopListening();
+    window.VuelSpeech.stopSpeaking(true);
     const modal = $("onboarding-modal");
     modal.classList.remove("hidden");
     $("onboarding-step-choose").classList.remove("hidden");
@@ -557,6 +743,8 @@
     if (bonusGems) updateGemsUI(bonusGems);
     $("onboarding-modal").classList.add("hidden");
     if (placementTimerInterval) clearInterval(placementTimerInterval);
+    liveCallActive = true;
+    isMuted = false;
     startScenario(profile.activeScenarioId || "grocery_store", true);
   }
 
@@ -597,7 +785,7 @@
     resBox.innerHTML = `
       <div>${escapeHtml(evalRes.feedbackAr)}</div>
       <button id="btn-placement-continue" class="primary-btn" style="margin-top:10px;width:100%" type="button">
-        ابدأ التعلم الآن 🚀
+        ابدأ المكالمة الآن 📞
       </button>
     `;
     $("btn-placement-continue").addEventListener("click", () => {
@@ -606,13 +794,53 @@
   }
 
   function bindEvents() {
-    // Bottom nav
     document.querySelectorAll(".nav-item").forEach((btn) => {
       btn.addEventListener("click", () => switchTab(btn.dataset.view));
     });
 
     $("btn-change-scenario").addEventListener("click", () => switchTab("scenarios"));
     $("btn-gems-pill").addEventListener("click", () => switchTab("profile"));
+
+    $("btn-toggle-history").addEventListener("click", () => {
+      $("chat-history-drawer").classList.toggle("hidden");
+    });
+    $("btn-close-history").addEventListener("click", () => {
+      $("chat-history-drawer").classList.add("hidden");
+    });
+
+    // Mute / Unmute Mic (prevents interrupting Vuel)
+    $("btn-mute-call").addEventListener("click", () => {
+      isMuted = !isMuted;
+      if (isMuted) {
+        clearTimeout(autoListenRetryTimer);
+        window.VuelSpeech.stopListening();
+        showToast("🔇 تم كتم الميكروفون — لن تقاطع فويل");
+      } else {
+        showToast("🎙️ تم فتح الميكروفون للمكالمة المباشرة");
+        if (liveCallActive && !window.VuelSpeech.isSpeaking()) {
+          scheduleAutoListen(150);
+        }
+      }
+      updateCallControlsUI();
+    });
+
+    // Toggle Continuous Google-Live Call Mode
+    $("btn-toggle-call").addEventListener("click", () => {
+      liveCallActive = !liveCallActive;
+      if (liveCallActive) {
+        isMuted = false;
+        showToast("📞 المكالمة المباشرة مفعّلة");
+        if (!window.VuelSpeech.isSpeaking()) {
+          scheduleAutoListen(150);
+        }
+      } else {
+        clearTimeout(autoListenRetryTimer);
+        window.VuelSpeech.stopListening();
+        window.VuelSpeech.stopSpeaking(true);
+        showToast("تم إيقاف الاستماع التلقائي مؤقتاً");
+      }
+      updateCallControlsUI();
+    });
 
     $("btn-speed-toggle").addEventListener("click", () => {
       profile.speechSpeed = profile.speechSpeed === "normal" ? "slow" : "normal";
@@ -623,50 +851,38 @@
 
     $("btn-replay-tts").addEventListener("click", () => {
       if (lastAiEnglishText) {
-        window.VuelSpeech.speakWithKaraoke(lastAiEnglishText, window.__lastWordEls || [], getSpeechRate(), "en-US");
+        window.VuelSpeech.speakWithKaraoke(lastAiEnglishText, window.__lastWordEls || [], getSpeechRate(), "en-US", () => {
+          scheduleAutoListen(300);
+        });
       }
     });
-    $("btn-stop-tts").addEventListener("click", () => window.VuelSpeech.stopSpeaking());
+    $("btn-stop-tts").addEventListener("click", () => {
+      window.VuelSpeech.stopSpeaking(true);
+      scheduleAutoListen(250);
+    });
 
     $("chat-form").addEventListener("submit", (e) => {
       e.preventDefault();
       handleUserMessage($("chat-input").value);
     });
 
-    // Mic STT on stage
-    let micActive = false;
-    $("btn-mic").addEventListener("click", () => {
-      if (micActive) {
-        window.VuelSpeech.stopListening();
-        micActive = false;
-        $("btn-mic").classList.remove("listening");
-        return;
-      }
-      window.VuelSpeech.stopSpeaking();
-      micActive = true;
-      $("btn-mic").classList.add("listening");
-      window.VuelSpeech.startListening({
-        onReady: () => showToast("تحدث بالإنجليزية الآن... 🎙️"),
-        onPartial: (txt) => { $("chat-input").value = txt; },
-        onResult: (txt) => {
-          $("chat-input").value = txt;
-          micActive = false;
-          $("btn-mic").classList.remove("listening");
-          if (txt && txt.trim()) handleUserMessage(txt);
-        },
-        onError: () => {
-          micActive = false;
-          $("btn-mic").classList.remove("listening");
-          showToast("تعذر التقاط الصوت؛ يمكنك الكتابة مباشرة ⌨️");
-        },
-        onEnd: () => {
-          micActive = false;
-          $("btn-mic").classList.remove("listening");
+    const charMount = $("svg-character-mount");
+    if (charMount) {
+      charMount.addEventListener("click", () => {
+        if (!window.VuelCharacters) return;
+        window.VuelCharacters.triggerBlink();
+        if (!window.VuelSpeech.isSpeaking()) {
+          window.VuelCharacters.setBodyState("happy");
+          setTimeout(() => {
+            if (!window.VuelSpeech.isSpeaking()) {
+              window.VuelCharacters.setBodyState(liveCallActive && !isMuted ? "listening" : "idle");
+            }
+          }, 900);
         }
-      }, "en-US");
-    });
+      });
+    }
 
-    // Smart Action Chips (Gems Economy)
+    // Smart Action Chips
     $("btn-smart-hint").addEventListener("click", () => {
       if (profile.gems < 5) {
         showToast("تحتاج 5 جواهر للحصول على تلميح ذكي 💎");
@@ -676,7 +892,7 @@
       const hints = activeScenario.hints || ["Could you help me, please?"];
       const pick = hints[Math.floor(Math.random() * hints.length)];
       $("chat-input").value = pick;
-      showToast("💡 تلميح جاهز! (-5 💎) اضغط إرسال أو عدّله");
+      showToast("💡 تلميح جاهز! (-5 💎)");
     });
 
     $("btn-skip-question").addEventListener("click", () => {
@@ -689,7 +905,7 @@
       const nextLine = followUps[chatHistory.length % Math.max(1, followUps.length)] ||
         "No problem! Let's move to the next step—what else would you like to practice?";
       chatHistory.push({ role: "assistant", englishText: nextLine });
-      appendAiBubble({
+      renderAiTurn({
         englishText: nextLine,
         arabicNote: "⏭️ تم تجاوز السؤال (-10 💎) والانتقال للخطوة التالية!",
         mistakePatch: null,
@@ -699,6 +915,20 @@
 
     $("btn-what-means").addEventListener("click", () => {
       handleUserMessage("ما معنى هذه؟");
+    });
+
+    // Curriculum web controls
+    $("btn-reload-curriculum").addEventListener("click", () => {
+      const iframe = $("curriculum-iframe");
+      if (iframe) iframe.src = window.VuelConfig.getCurriculumUrl();
+    });
+    $("btn-open-curriculum-ext").addEventListener("click", () => {
+      const url = window.VuelConfig.getCurriculumUrl();
+      if (window.VuelBridge && typeof window.VuelBridge.openExternalUrl === "function") {
+        window.VuelBridge.openExternalUrl(url);
+      } else {
+        window.open(url, "_blank");
+      }
     });
 
     // Scenario Search
@@ -746,6 +976,11 @@
       updateConnectionBadge();
       showToast(val ? "تم حفظ رابط Cloudflare Worker بنجاح ✓" : "تمت العودة للإعداد الافتراضي");
     });
+    $("btn-save-curriculum-url").addEventListener("click", () => {
+      const val = $("curriculum-url-input").value.trim();
+      window.VuelConfig.setCurriculumUrl(val);
+      showToast("تم حفظ رابط تبويب مناهج ✓");
+    });
     $("btn-retake-placement").addEventListener("click", openOnboardingModal);
     $("btn-reset-data").addEventListener("click", () => {
       profile = window.VuelStorage.clearAllData();
@@ -770,9 +1005,10 @@
 
     if (!profile.onboardingDone) {
       renderStageHeaderAndCharacter();
+      updateCallControlsUI();
       openOnboardingModal();
     } else {
-      startScenario(profile.activeScenarioId || "grocery_store", false);
+      startScenario(profile.activeScenarioId || "grocery_store", true);
     }
   }
 

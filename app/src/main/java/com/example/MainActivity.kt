@@ -8,7 +8,7 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.os.Build
+import android.net.Uri
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -30,13 +30,31 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
@@ -45,10 +63,16 @@ import java.util.Locale
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     private var webView: WebView? = null
+    private var curriculumWebView: WebView? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var speechRecognizer: SpeechRecognizer? = null
     private var pendingSttLang: String? = null
+    private var lastRmsEmitMs = 0L
+
+    private var showCurriculum by mutableStateOf(false)
+    private var curriculumUrl by mutableStateOf("https://azm-study.free.nf")
+    private var curriculumProgress by mutableIntStateOf(100)
 
     private val requestMicPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -74,7 +98,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         setContent {
             VuelHostScreen(
                 onWebViewReady = { wv -> webView = wv },
+                onCurriculumWebViewReady = { cwv -> curriculumWebView = cwv },
                 onBackPressed = {
+                    val cwv = curriculumWebView
+                    if (showCurriculum && cwv != null) {
+                        if (cwv.canGoBack()) {
+                            cwv.goBack()
+                        } else {
+                            showCurriculum = false
+                            webView?.evaluateJavascript("window.__vuelSwitchToStage && window.__vuelSwitchToStage()", null)
+                        }
+                        return@VuelHostScreen
+                    }
                     val wv = webView
                     if (wv != null) {
                         wv.evaluateJavascript("window.__vuelHandleBack && window.__vuelHandleBack()") { result ->
@@ -166,7 +201,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             emitSttEvent("speech_start", "")
                         }
 
-                        override fun onRmsChanged(rmsdB: Float) {}
+                        override fun onRmsChanged(rmsdB: Float) {
+                            val now = System.currentTimeMillis()
+                            if (now - lastRmsEmitMs > 120L) {
+                                lastRmsEmitMs = now
+                                emitSttEvent("rms", rmsdB.toString())
+                            }
+                        }
 
                         override fun onBufferReceived(buffer: ByteArray?) {}
 
@@ -201,6 +242,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1400L)
                 }
                 speechRecognizer?.startListening(intent)
             } catch (e: Exception) {
@@ -219,6 +261,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             val network = cm.activeNetwork ?: return false
             val caps = cm.getNetworkCapabilities(network) ?: return false
             return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }
+
+        @JavascriptInterface
+        fun hasMicPermission(): Boolean {
+            return ContextCompat.checkSelfPermission(
+                this@MainActivity,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
         }
 
         @JavascriptInterface
@@ -259,7 +309,34 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         @JavascriptInterface
         fun stopListening() {
             runOnUiThread {
-                speechRecognizer?.stopListening()
+                speechRecognizer?.cancel()
+            }
+        }
+
+        @JavascriptInterface
+        fun openCurriculum(url: String) {
+            runOnUiThread {
+                val target = if (url.startsWith("http")) url else "https://$url"
+                curriculumUrl = target
+                showCurriculum = true
+                curriculumWebView?.loadUrl(target)
+            }
+        }
+
+        @JavascriptInterface
+        fun closeCurriculum() {
+            runOnUiThread {
+                showCurriculum = false
+            }
+        }
+
+        @JavascriptInterface
+        fun openExternalUrl(url: String) {
+            runOnUiThread {
+                try {
+                    val target = if (url.startsWith("http")) url else "https://$url"
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
+                } catch (_: Exception) {}
             }
         }
     }
@@ -268,6 +345,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     @Composable
     private fun VuelHostScreen(
         onWebViewReady: (WebView) -> Unit,
+        onCurriculumWebViewReady: (WebView) -> Unit,
         onBackPressed: () -> Unit
     ) {
         BackHandler { onBackPressed() }
@@ -311,6 +389,76 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     }
                 }
             )
+
+            if (showCurriculum) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = 64.dp)
+                        .background(ComposeColor(0xFF070B14))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .background(ComposeColor(0xFF0E1525))
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "📚 مناهج • azm-study.free.nf",
+                            color = ComposeColor(0xFF00E5FF),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { curriculumWebView?.reload() }) {
+                            Text("تحديث", color = ComposeColor(0xFFF8FAFC), fontSize = 12.sp)
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        TextButton(onClick = {
+                            try {
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(curriculumUrl)))
+                            } catch (_: Exception) {}
+                        }) {
+                            Text("المتصفح", color = ComposeColor(0xFF10B981), fontSize = 12.sp)
+                        }
+                    }
+
+                    if (curriculumProgress < 100) {
+                        LinearProgressIndicator(
+                            progress = { curriculumProgress / 100f },
+                            modifier = Modifier.fillMaxWidth().height(2.dp),
+                            color = ComposeColor(0xFF00E5FF)
+                        )
+                    }
+
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { context ->
+                            WebView(context).apply {
+                                setBackgroundColor(Color.parseColor("#070B14"))
+                                settings.apply {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    useWideViewPort = true
+                                    loadWithOverviewMode = true
+                                    builtInZoomControls = true
+                                    displayZoomControls = false
+                                }
+                                webViewClient = WebViewClient()
+                                webChromeClient = object : WebChromeClient() {
+                                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                        curriculumProgress = newProgress
+                                    }
+                                }
+                                loadUrl(curriculumUrl)
+                                onCurriculumWebViewReady(this)
+                            }
+                        }
+                    )
+                }
+            }
         }
     }
 
@@ -318,6 +466,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         tts?.stop()
         tts?.shutdown()
         speechRecognizer?.destroy()
+        curriculumWebView?.destroy()
         webView?.destroy()
         super.onDestroy()
     }

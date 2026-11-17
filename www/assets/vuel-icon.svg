@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B132B"/>
+      <stop offset="55%" stop-color="#070D23"/>
+      <stop offset="100%" stop-color="#030712"/>
+    </linearGradient>
+    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00E5FF"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+    <radialGradient id="eye" cx="45%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#FEF08A"/>
+      <stop offset="65%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#B45309"/>
+    </radialGradient>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="url(#bg)"/>
+  <circle cx="64" cy="64" r="50" fill="none" stroke="url(#neon)" stroke-width="2.5" opacity="0.45"/>
+  <path d="M30 42 L44 26 L56 38 L72 38 L84 26 L98 42 L94 82 L64 102 L34 82 Z" fill="#0E2A47" stroke="url(#neon)" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="48" cy="61" r="13" fill="#061224" stroke="#38BDF8" stroke-width="2.2"/>
+  <circle cx="80" cy="61" r="13" fill="#061224" stroke="#38BDF8" stroke-width="2.2"/>
+  <circle cx="48" cy="61" r="7.5" fill="url(#eye)"/>
+  <circle cx="80" cy="61" r="7.5" fill="url(#eye)"/>
+  <circle cx="48" cy="61" r="3.6" fill="#050811"/>
+  <circle cx="80" cy="61" r="3.6" fill="#050811"/>
+  <circle cx="50.5" cy="58.5" r="1.8" fill="#FFFFFF"/>
+  <circle cx="82.5" cy="58.5" r="1.8" fill="#FFFFFF"/>
+  <polygon points="64,69 57,79 71,79" fill="url(#neon)"/>
+</svg>
