@@ -53,14 +53,23 @@ CRITICAL LIVE-CALL RULES:
 
     let englishText = text;
     let arabicNote = "";
-    const arIdx = text.indexOf("\nAR:");
-    if (arIdx !== -1) {
+    const arTagMatch = text.match(/\n\s*AR:\s*/i);
+    if (arTagMatch) {
+      const arIdx = arTagMatch.index;
       englishText = text.slice(0, arIdx).trim();
-      arabicNote = text.slice(arIdx + 4).trim();
-    } else if (text.startsWith("AR:")) {
+      arabicNote = text.slice(arIdx + arTagMatch[0].length).trim();
+    } else if (/^AR:\s*/i.test(text)) {
       const lines = text.split("\n");
-      arabicNote = lines[0].replace(/^AR:\s*/, "").trim();
+      arabicNote = lines[0].replace(/^AR:\s*/i, "").trim();
       englishText = lines.slice(1).join(" ").trim();
+    } else {
+      // Fallback: if Gemini placed Arabic paragraph on a new line without "AR:"
+      const lines = text.split("\n");
+      const firstArLineIdx = lines.findIndex((ln) => /^\s*[\u0600-\u06FF]/.test(ln));
+      if (firstArLineIdx > 0) {
+        englishText = lines.slice(0, firstArLineIdx).join(" ").trim();
+        arabicNote = lines.slice(firstArLineIdx).join(" ").trim();
+      }
     }
 
     return { englishText, arabicNote, profilePatch, mistakePatch };
@@ -323,6 +332,71 @@ CRITICAL LIVE-CALL RULES:
     }
   }
 
+  let activeTurnController = null;
+
+  function abortActiveTurn() {
+    if (activeTurnController) {
+      try { activeTurnController.abort(); } catch (_) {}
+      activeTurnController = null;
+    }
+  }
+
+  async function startScenarioOpening({ profile, scenario, recentMistakes }) {
+    const fallback = {
+      englishText: scenario.openingLine,
+      arabicNote: profile.level === "beginner" ? (scenario.openingLineAr || "") : "",
+      mode: "offline"
+    };
+
+    const workerUrl = window.VuelConfig && window.VuelConfig.getWorkerUrl();
+    const configured = window.VuelConfig && window.VuelConfig.isWorkerConfigured();
+    const online = window.VuelSpeech ? window.VuelSpeech.isOnline() : navigator.onLine !== false;
+    if (!configured || !online) return fallback;
+
+    abortActiveTurn();
+    const controller = new AbortController();
+    activeTurnController = controller;
+    const tid = setTimeout(() => controller.abort(), 5000);
+
+    try {
+      const prompt = buildSystemPrompt(profile, scenario, recentMistakes);
+      const openerInstruction = profile.level === "beginner"
+        ? `Start the live call for scenario "${scenario.titleEn}" (${scenario.titleAr}) with a warm, natural 1-2 sentence English opening question, followed on a new line by "AR:" and a brief friendly Arabic translation.`
+        : `Start the live call for scenario "${scenario.titleEn}" with a natural 1-2 sentence English opening question.`;
+
+      const res = await fetch(workerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: PRIMARY_MODEL,
+          systemPrompt: prompt,
+          history: [],
+          message: openerInstruction
+        })
+      });
+      clearTimeout(tid);
+      if (!res.ok) return fallback;
+
+      const raw = await readWorkerStreamOrJson(res, null, null);
+      if (!raw || !raw.trim()) return fallback;
+      const parsed = parseTaggedResponse(raw);
+      if (!parsed.englishText) return fallback;
+      return {
+        englishText: parsed.englishText,
+        arabicNote: parsed.arabicNote || (profile.level === "beginner" ? (scenario.openingLineAr || "") : ""),
+        mode: "live"
+      };
+    } catch (_) {
+      clearTimeout(tid);
+      return fallback;
+    } finally {
+      if (activeTurnController === controller) {
+        activeTurnController = null;
+      }
+    }
+  }
+
   async function sendTurn({ userText, profile, scenario, history, recentMistakes, lastAiText, onChunk, onNetworkDrop }) {
     const workerUrl = window.VuelConfig && window.VuelConfig.getWorkerUrl();
     const configured = window.VuelConfig && window.VuelConfig.isWorkerConfigured();
@@ -334,7 +408,9 @@ CRITICAL LIVE-CALL RULES:
       return { ...offlineResult, mode: "offline" };
     }
 
+    abortActiveTurn();
     const controller = new AbortController();
+    activeTurnController = controller;
     let stallTimer = null;
     const resetStallWatchdog = () => {
       if (stallTimer) clearTimeout(stallTimer);
@@ -343,6 +419,14 @@ CRITICAL LIVE-CALL RULES:
         controller.abort();
       }, 12500);
     };
+
+    // Exclude the current user message if already appended to chatHistory so Worker does not duplicate it
+    const rawHist = Array.isArray(history) ? history : [];
+    const lastHist = rawHist[rawHist.length - 1];
+    const priorHistory =
+      lastHist && lastHist.role === "user" && (lastHist.text === userText || lastHist.englishText === userText)
+        ? rawHist.slice(0, -1)
+        : rawHist;
 
     try {
       resetStallWatchdog();
@@ -353,7 +437,7 @@ CRITICAL LIVE-CALL RULES:
         body: JSON.stringify({
           model: PRIMARY_MODEL,
           systemPrompt: buildSystemPrompt(profile, scenario, recentMistakes),
-          history: history.slice(-8).map((m) => ({ role: m.role, text: m.englishText || m.text })),
+          history: priorHistory.slice(-8).map((m) => ({ role: m.role, text: m.englishText || m.text })),
           message: userText
         })
       });
@@ -377,6 +461,10 @@ CRITICAL LIVE-CALL RULES:
       if (onNetworkDrop) onNetworkDrop();
       const offlineResult = generateOfflineReply({ userText, profile, scenario, history, lastAiText });
       return { ...offlineResult, mode: "offline-fallback" };
+    } finally {
+      if (activeTurnController === controller) {
+        activeTurnController = null;
+      }
     }
   }
 
@@ -447,7 +535,9 @@ CRITICAL LIVE-CALL RULES:
   }
 
   window.VuelAI = {
+    startScenarioOpening,
     sendTurn,
+    abortActiveTurn,
     evaluatePlacementTest
   };
 })();

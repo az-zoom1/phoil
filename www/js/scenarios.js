@@ -5,7 +5,7 @@
  */
 (function () {
   const CATEGORIES = [
-    { id: "all", labelAr: "الكل (54)" },
+    { id: "all", labelAr: "الكل (55)" },
     { id: "daily", labelAr: "الحياة والتسوق" },
     { id: "food", labelAr: "الطعام والمطاعم" },
     { id: "travel", labelAr: "السفر والمواصلات" },
@@ -16,6 +16,23 @@
   ];
 
   const SCENARIOS = [
+    {
+      id: "free_conversation",
+      titleEn: "Free AI Conversation",
+      titleAr: "محادثة حرة بالذكاء الاصطناعي",
+      category: "daily",
+      character: "owl",
+      outfit: "default",
+      difficulty: "الكل",
+      emoji: "🤖",
+      openingLine: "Hey! I'm Vuel, your live AI English partner. What topic would you love to talk about together right now?",
+      openingLineAr: "أهلاً! أنا فويل شريكك الذكي لتعلّم الإنجليزية. ما الموضوع الذي تحب أن نتحدث عنه معاً الآن؟",
+      hints: ["Let's talk about my favorite hobby!", "Help me practice introducing myself.", "Ask me three fun questions in English."],
+      followUps: [
+        "That is really interesting! Could you tell me more details in English?",
+        "Awesome! What happened next, and how did you feel about it?"
+      ]
+    },
     {
       id: "grocery_store",
       titleEn: "Grocery Store",

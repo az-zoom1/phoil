@@ -435,8 +435,13 @@
     window.__popupWord = info.word;
   }
 
-  function startScenario(scenarioId, autoSpeak = true) {
+  let scenarioLoadToken = 0;
+
+  async function startScenario(scenarioId, autoSpeak = true) {
+    const token = ++scenarioLoadToken;
     clearTimeout(autoListenRetryTimer);
+    window.VuelAI && window.VuelAI.abortActiveTurn && window.VuelAI.abortActiveTurn();
+    isSending = false;
     window.VuelSpeech.stopListening();
     window.VuelSpeech.stopSpeaking(true);
 
@@ -447,13 +452,53 @@
     chatHistory = [];
     $("chat-feed").innerHTML = "";
     renderStageHeaderAndCharacter();
+    renderScenariosGrid();
     updateCallControlsUI();
-
-    const opening = activeScenario.openingLine;
-    const arNote = profile.level === "beginner" ? activeScenario.openingLineAr : "";
-    chatHistory.push({ role: "assistant", englishText: opening });
-
     switchTab("stage");
+
+    let opening = activeScenario.openingLine;
+    let arNote = profile.level === "beginner" ? activeScenario.openingLineAr : "";
+
+    const configured = window.VuelConfig && window.VuelConfig.isWorkerConfigured();
+    const online = window.VuelSpeech && window.VuelSpeech.isOnline();
+
+    if (configured && online && window.VuelAI && typeof window.VuelAI.startScenarioOpening === "function") {
+      const subEn = $("live-subtitle-en");
+      const subAr = $("live-subtitle-ar");
+      const subCorr = $("live-subtitle-corr");
+      if (subEn) subEn.textContent = "Connecting to Vuel AI...";
+      if (subAr) {
+        subAr.textContent = `جاري تجهيز مكالمة "${activeScenario.titleAr}" بالذكاء الاصطناعي...`;
+        subAr.classList.remove("hidden");
+      }
+      if (subCorr) subCorr.classList.add("hidden");
+      window.VuelSpeech.setBadgeState("idle", "جاري الاتصال بالذكاء الاصطناعي...");
+      window.VuelCharacters && window.VuelCharacters.setBodyState("thinking");
+
+      const aiOpening = await window.VuelAI.startScenarioOpening({
+        profile,
+        scenario: activeScenario,
+        recentMistakes: mistakes.slice(0, 4)
+      });
+
+      if (token !== scenarioLoadToken) return;
+      opening = aiOpening.englishText || opening;
+      arNote = aiOpening.arabicNote !== undefined ? aiOpening.arabicNote : arNote;
+
+      const badge = $("connection-badge");
+      if (badge) {
+        if (aiOpening.mode === "live") {
+          badge.className = "status-pill status-online";
+          badge.textContent = "Worker متصل • Gemini Live ✓";
+        } else {
+          badge.className = "status-pill status-offline";
+          badge.textContent = "أوفلاين • المعلّم المحلي";
+        }
+      }
+    }
+
+    if (token !== scenarioLoadToken) return;
+    chatHistory.push({ role: "assistant", englishText: opening });
     renderAiTurn({
       englishText: opening,
       arabicNote: arNote,
@@ -483,66 +528,73 @@
     const subAr = $("live-subtitle-ar");
     const subCorr = $("live-subtitle-corr");
 
-    const result = await window.VuelAI.sendTurn({
-      userText: text,
-      profile,
-      scenario: activeScenario,
-      history: chatHistory,
-      recentMistakes,
-      lastAiText: lastAiEnglishText,
-      onChunk: (partialEnglish) => {
-        if (subEn) subEn.textContent = partialEnglish;
-        if (subAr) subAr.classList.add("hidden");
-        if (subCorr) subCorr.classList.add("hidden");
-      },
-      onNetworkDrop: () => {
-        window.VuelSpeech.freezeMouthOnStreamDrop();
-      }
-    });
-
-    const badge = $("connection-badge");
-    if (badge) {
-      if (result.mode === "live") {
-        badge.className = "status-pill status-online";
-        badge.textContent = "Worker متصل • Gemini Live ✓";
-      } else {
-        badge.className = "status-pill status-offline";
-        badge.textContent = "أوفلاين • المعلّم المحلي";
-      }
-    }
-
-    if (result.profilePatch) {
-      profile = window.VuelStorage.extractAndMergeProfile("", profile, result.profilePatch);
-    }
-
-    if (result.mistakePatch && result.mistakePatch.correct) {
-      mistakes = await window.VuelStorage.saveMistake({
-        ...result.mistakePatch,
-        scenarioId: activeScenario.id,
-        scenarioTitleAr: activeScenario.titleAr
+    try {
+      const result = await window.VuelAI.sendTurn({
+        userText: text,
+        profile,
+        scenario: activeScenario,
+        history: chatHistory,
+        recentMistakes,
+        lastAiText: lastAiEnglishText,
+        onChunk: (partialEnglish) => {
+          if (subEn) subEn.textContent = partialEnglish;
+          if (subAr) subAr.classList.add("hidden");
+          if (subCorr) subCorr.classList.add("hidden");
+        },
+        onNetworkDrop: () => {
+          window.VuelSpeech.freezeMouthOnStreamDrop();
+        }
       });
-      showToast("تم حفظ التصحيح في 'أخطائي' للمراجعة أوفلاين 🃏");
+
+      const badge = $("connection-badge");
+      if (badge) {
+        if (result.mode === "live") {
+          badge.className = "status-pill status-online";
+          badge.textContent = "Worker متصل • Gemini Live ✓";
+        } else {
+          badge.className = "status-pill status-offline";
+          badge.textContent = "أوفلاين • المعلّم المحلي";
+        }
+      }
+
+      if (result.profilePatch) {
+        profile = window.VuelStorage.extractAndMergeProfile("", profile, result.profilePatch);
+      }
+
+      if (result.mistakePatch && result.mistakePatch.correct) {
+        mistakes = await window.VuelStorage.saveMistake({
+          ...result.mistakePatch,
+          scenarioId: activeScenario.id,
+          scenarioTitleAr: activeScenario.titleAr
+        });
+        showToast("تم حفظ التصحيح في 'أخطائي' للمراجعة أوفلاين 🃏");
+      }
+
+      const earned = result.gemsEarned || 10;
+      profile.streak = (profile.streak || 0) + 1;
+      if (profile.streak % 3 === 0) {
+        updateGemsUI(earned + 5);
+        showToast(`🔥 سلسلة رائعة! +${earned + 5} جوهرة 💎`);
+        window.VuelCharacters && window.VuelCharacters.setBodyState("happy");
+      } else {
+        updateGemsUI(earned);
+      }
+
+      chatHistory.push({ role: "assistant", englishText: result.englishText });
+      isSending = false;
+
+      renderAiTurn({
+        englishText: result.englishText,
+        arabicNote: result.arabicNote,
+        mistakePatch: result.mistakePatch,
+        speakNow: true
+      });
+    } catch (_) {
+      isSending = false;
+      window.VuelSpeech.setBadgeState("idle", "اضغط زر المكالمة للمحاولة 🎙️");
+    } finally {
+      isSending = false;
     }
-
-    const earned = result.gemsEarned || 10;
-    profile.streak = (profile.streak || 0) + 1;
-    if (profile.streak % 3 === 0) {
-      updateGemsUI(earned + 5);
-      showToast(`🔥 سلسلة رائعة! +${earned + 5} جوهرة 💎`);
-      window.VuelCharacters && window.VuelCharacters.setBodyState("happy");
-    } else {
-      updateGemsUI(earned);
-    }
-
-    chatHistory.push({ role: "assistant", englishText: result.englishText });
-    isSending = false;
-
-    renderAiTurn({
-      englishText: result.englishText,
-      arabicNote: result.arabicNote,
-      mistakePatch: result.mistakePatch,
-      speakNow: true
-    });
   }
 
   function renderCategoryPills() {
